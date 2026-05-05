@@ -44,9 +44,7 @@ async def is_subscribed(user_id):
     except: return False
 
 def get_main_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{ADMIN_USERNAME}")]
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{ADMIN_USERNAME}")]])
 
 def get_admin_kb():
     return ReplyKeyboardMarkup(keyboard=[
@@ -54,15 +52,20 @@ def get_admin_kb():
         [KeyboardButton(text="➕ Manage Credits")]
     ], resize_keyboard=True)
 
-# --- ৪. মেইন লজিক (এখানে ভিডিও লিঙ্ক পাঠানোর লজিক যোগ করা হয়েছে) ---
+# অটো ডিলিট ফাংশন
+async def auto_delete(chat_id, msg_id):
+    await asyncio.sleep(600) # ১০ মিনিট
+    try: await bot.delete_message(chat_id, msg_id)
+    except: pass
+
+# --- ৪. মেইন লজিক ---
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, command: CommandObject):
     uid = message.from_user.id
-    v_key = command.args # লিঙ্ক থেকে আসা ভিডিও কি
+    v_key = command.args
     name = message.from_user.full_name
 
-    # সাবস্ক্রিপশন চেক
     if not await is_subscribed(uid):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_URL)],
@@ -71,72 +74,66 @@ async def start_cmd(message: types.Message, command: CommandObject):
         await message.answer("⚠️ **You must join all channels to use this bot.**", reply_markup=kb)
         return
 
-    # ইউজার ডাটা হ্যান্ডেল
     user = await users_col.find_one({"user_id": uid})
     if not user:
         user = {"user_id": uid, "credits": 10, "name": name}
         await users_col.insert_one(user)
 
-    # যদি ইউজার কোনো ভিডিও লিঙ্ক (v_key) এর মাধ্যমে আসে
     if v_key:
         v_data = await video_links_col.find_one({"video_key": v_key})
         if v_data:
             if user['credits'] > 0:
-                # ভিডিও পাঠিয়ে দেওয়া
-                await message.answer_video(
+                # এখানে আপনার দেওয়া ওয়ার্নিং মেসেজটি যোগ করা হয়েছে
+                sent_v = await message.answer_video(
                     video=v_data['file_id'], 
-                    caption=f"🎬 **ভিডিও রেডি!**\n💰 আপনার ক্রেডিট: {user['credits'] - 1}"
+                    caption=f"🎬 **ভিডিও রেডি!**\n💰 আপনার ক্রেডিট: {user['credits'] - 1}\n\nwarning ⚠️ভিডিও টি,১০ মিনিট পড়ে ডিলিট হয়ে যাবে"
                 )
                 await users_col.update_one({"user_id": uid}, {"$inc": {"credits": -1}})
-                return # ভিডিও পাঠানো হলে এখানেই শেষ
+                asyncio.create_task(auto_delete(message.chat.id, sent_v.message_id))
+                return
             else:
-                await message.answer("⚠️ আপনার ক্রেডিট শেষ! দয়া করে ক্রেডিট কিনুন।")
+                await message.answer("⚠️ আপনার পর্যাপ্ত ক্রেডিট নেই!")
                 return
 
-    # লিঙ্ক ছাড়া সরাসরি বটে আসলে প্রোফাইল দেখাবে
     profile_txt = (
-        f"👤 **User:** {name}\n"
-        f"🆔 **User ID:** `{uid}`\n"
+        f"👤 **User:** {name}\n🆔 **User ID:** `{uid}`\n"
         "━━━━━━━━━━━━━━━━━\n"
         f"💰 **Credits:** {user['credits']}\n\n"
-        "━━━━━━━━━━━━━━━━━\n"
-        "✨ **Note:** You can earn 10 free credits by watching ads.\n"
-        "🎉 **Enjoy your time!**"
+        "✨ Earn free credits by watching ads.\n🎉 Enjoy your time!"
     )
-
     r_markup = get_admin_kb() if uid == ADMIN_ID else None
     await message.answer(profile_txt, reply_markup=get_main_kb(), parse_mode="Markdown")
     if r_markup: await message.answer("🛠 Admin Panel Active", reply_markup=r_markup)
+
+# অ্যাডমিন ভিডিও আপলোড
+@dp.message(F.video & (F.from_user.id == ADMIN_ID))
+async def admin_video_upload(message: types.Message):
+    v_key = f"vid{random.randint(1000, 9999)}"
+    await video_links_col.insert_one({"video_key": v_key, "file_id": message.video.file_id})
+    link = f"https://t.me/{BOT_USERNAME}?start={v_key}"
+    await message.answer(f"✅ **ভিডিও সেভ হয়েছে!**\n\n🔗 লিঙ্ক:\n`{link}`", parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("check_"))
 async def check_callback(callback: types.CallbackQuery):
     if await is_subscribed(callback.from_user.id):
         await callback.answer("✅ Subscribed!", show_alert=True)
         await callback.message.delete()
-    else:
-        await callback.answer("❌ Please join the channel first!", show_alert=True)
+    else: await callback.answer("❌ Please join first!", show_alert=True)
 
 # --- ৫. অ্যাডমিন ফিচারস ---
 
 @dp.message(F.text == "📊 Stats")
-async def admin_stats_fixed(message: types.Message):
+async def admin_stats(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    total_users = await users_col.count_documents({})
-    total_vids = await video_links_col.count_documents({})
-    report = (
-        "📊 **System Status Report**\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 **Total Users:** `{total_users}`\n"
-        f"🎬 **Stored Videos:** `{total_vids}`\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "📡 **Server:** `Online` | ⚡ **Ping:** `Stable`"
-    )
+    total_u = await users_col.count_documents({})
+    total_v = await video_links_col.count_documents({})
+    report = f"📊 **System Status**\n━━━━━━━━━━━━━\n👥 ইউজার: `{total_u}`\n🎬 ভিডিও: `{total_v}`\n━━━━━━━━━━━━━"
     await message.answer(report, parse_mode="Markdown")
 
 @dp.message(F.text == "📢 Broadcast")
-async def admin_broadcast_fixed(message: types.Message):
+async def admin_broadcast_prompt(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    await message.answer("📢 **Broadcast Mode Active**\n\nTo send a message, use:\n`/send Your Message`", parse_mode="Markdown")
+    await message.answer("📢 **ব্রডকাস্ট:**\n`/send আপনার মেসেজ`", parse_mode="Markdown")
 
 @dp.message(Command("send"))
 async def process_send(message: types.Message, command: CommandObject):
@@ -145,21 +142,19 @@ async def process_send(message: types.Message, command: CommandObject):
     users = users_col.find(); s, f = 0, 0
     async for u in users:
         try:
-            msg = f"📢 **New Announcement**\n━━━━━━━━━━━━━━━━━━━━\n\n{command.args}\n\n━━━━━━━━━━━━━━━━━━━━"
-            await bot.send_message(u['user_id'], msg, parse_mode="Markdown")
+            await bot.send_message(u['user_id'], f"📢 **New Announcement**\n━━━━━━━━━━━━━\n\n{command.args}\n\n━━━━━━━━━━━━━", parse_mode="Markdown")
             s += 1; await asyncio.sleep(0.05)
         except: f += 1
-    await status.edit_text(f"✅ **Sent!**\n🚀 Success: `{s}`\n❌ Failed: `{f}`")
+    await status.edit_text(f"✅ **Sent!**\n🚀 সফল: `{s}`\n❌ ব্যর্থ: `{f}`")
 
 @dp.message(Command("add"))
 async def cmd_add(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID: return
     try:
-        args = command.args.split()
-        target_id, amount = int(args[0]), int(args[1])
-        await users_col.update_one({"user_id": target_id}, {"$inc": {"credits": amount}})
-        await message.answer(f"✅ ID `{target_id}` added `{amount}` credits.")
-    except: await message.answer("❌ Format: `/add ID Amount`")
+        args = command.args.split(); target_id, amt = int(args[0]), int(args[1])
+        await users_col.update_one({"user_id": target_id}, {"$inc": {"credits": amt}})
+        await message.answer(f"✅ ID `{target_id}` added `{amt}` credits.")
+    except: await message.answer("❌ `/add ID Amount`")
 
 # --- ৬. রানার ---
 async def main():
@@ -168,4 +163,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                
+    
