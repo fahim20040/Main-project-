@@ -1,15 +1,17 @@
 import logging
+import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# কনফিগারেশন
-API_TOKEN = 'YOUR_BOT_TOKEN_HERE'
-MONGO_URL = "YOUR_MONGODB_URL_HERE"
-ADMIN_ID = 123456789  # আপনার টেলিগ্রাম আইডি
+# ১. কনফিগারেশন
+API_TOKEN = '8565287860:AAGdaKZwgmowMGa1TsnG5zZxyAE9LCyKvRQ'
+MONGO_URL = "mongodb+srv://itsmeratul3_db_user:j3XwaF5yZmbfPbYQ@mybotdatabase.5m5engl.mongodb.net/?appName=MyBotDatabase"
+ADMIN_ID = 6793604200 
+ADMIN_LINK = "t.me/artist_x0"
 
-# লগিং এবং বট সেটআপ
+# ২. লগিং এবং বট সেটআপ
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
@@ -17,7 +19,7 @@ client = AsyncIOMotorClient(MONGO_URL)
 db = client['video_bot_db']
 users_col = db['users']
 
-# ১. ইউজার জয়েন করলে ১০ ক্রেডিট ফ্রি
+# ৩. ইউজার তথ্য ম্যানেজমেন্ট
 async def get_user(user_id):
     user = await users_col.find_one({"user_id": user_id})
     if not user:
@@ -25,51 +27,75 @@ async def get_user(user_id):
         await users_col.insert_one(user)
     return user
 
+# ৪. স্টার্ট কমান্ড (Deep Linking হ্যান্ডলিং সহ)
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    # Deep Linking চেক করা (start=video_123)
-    args = message.text.split()
     user = await get_user(message.from_user.id)
+    args = message.text.split(maxsplit=1)
     
     if len(args) > 1:
         video_id = args[1]
         
-        # ২. ক্রেডিট চেক
         if user['credits'] > 0:
-            # এখানে ভিডিও সেন্ড করার লজিক (আপনার ডাটাবেজ থেকে video_id অনুযায়ী)
+            new_credits = user['credits'] - 1
             await users_col.update_one({"user_id": message.from_user.id}, {"$inc": {"credits": -1}})
-            await message.answer_video(video=video_id, caption=f"আপনার ভিডিও! বাকি ক্রেডিট: {user['credits']-1}")
+            
+            try:
+                await message.answer_video(
+                    video=video_id, 
+                    caption=f"✅ আপনার ভিডিও প্রস্তুত!\n💰 অবশিষ্ট ক্রেডিট: {new_credits}"
+                )
+            except Exception as e:
+                await message.answer(f"❌ ভিডিও পাঠাতে সমস্যা হয়েছে: {e}")
         else:
-            # ক্রেডিট শেষ হয়ে গেলে কাস্টম বাটনসহ মেসেজ
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="ক্রেডিট কিনুন", url="https://t.me/your_admin_link")],
-                [InlineKeyboardButton(text="ফ্রি ক্রেডিট পান", callback_data="free_tasks")]
+                [InlineKeyboardButton(text="💳 ক্রেডিট কিনুন", url=f"https://{ADMIN_LINK}")]
             ])
-            await message.answer("আপনার ক্রেডিট শেষ! ভিডিও দেখতে ক্রেডিট সংগ্রহ করুন।", reply_markup=keyboard)
+            await message.answer("⚠️ আপনার ক্রেডিট শেষ! আরও ভিডিও দেখতে ক্রেডিট কিনুন।", reply_markup=keyboard)
     else:
-        await message.answer(f"স্বাগতম! আপনার বর্তমান ক্রেডিট: {user['credits']}")
+        await message.answer(f"👋 স্বাগতম!\nআপনার বর্তমান ক্রেডিট: {user['credits']}\n\nভিডিও পেতে লিঙ্কে ক্লিক করুন।")
 
-# ৩. প্রমোশনাল মেসেজ (Broadcasting)
+# ৫. প্রোফাইল বা ক্রেডিট চেক কমান্ড
+@dp.message(Command("credits"))
+async def check_credits(message: types.Message):
+    user = await get_user(message.from_user.id)
+    await message.answer(f"👤 আপনার প্রোফাইল:\n💰 বর্তমান ক্রেডিট: {user['credits']}")
+
+# ৬. ব্রডকাস্টিং (শুধুমাত্র অ্যাডমিনের জন্য)
 @dp.message(Command("broadcast"))
 async def broadcast(message: types.Message):
-    if message.from_user.id != ADMIN_ID: return
-    
+    if message.from_user.id != ADMIN_ID:
+        return
+
     text = message.text.replace("/broadcast ", "")
+    if not text or text == "/broadcast":
+        await message.answer("⚠️ সঠিক ফরম্যাট: `/broadcast আপনার মেসেজ`", parse_mode="Markdown")
+        return
+
     all_users = users_col.find()
     count = 0
     async for user in all_users:
         try:
             await bot.send_message(user['user_id'], text)
             count += 1
-        except: pass
-    await message.answer(f"মোট {count} জন ইউজারকে মেসেজ পাঠানো হয়েছে।")
+        except Exception as e:
+            logging.error(f"Error sending to {user['user_id']}: {e}")
+    
+    await message.answer(f"📢 মোট {count} জন ইউজারকে মেসেজ পাঠানো হয়েছে।")
 
-# ভিডিও ফাইল আইডি পাওয়ার জন্য (শুধু এডমিন ব্যবহার করবে)
+# ৭. অ্যাডমিনের জন্য ভিডিও আইডি পাওয়া
 @dp.message(lambda message: message.video)
 async def get_video_id(message: types.Message):
     if message.from_user.id == ADMIN_ID:
-        await message.answer(f"এই ভিডিওর ID: `{message.video.file_id}`\n\nলিংক হবে: `https://t.me/YOUR_BOT_USERNAME?start={message.video.file_id}`", parse_mode="Markdown")
+        await message.answer(f"🎬 ভিডিও ফাইল আইডি:\n`{message.video.file_id}`", parse_mode="Markdown")
+
+# ৮. বট রান করা
+async def main():
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    dp.run_polling(bot)
-  
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Bot stopped!")
+        
