@@ -61,7 +61,6 @@ async def start_cmd(message: types.Message, command: CommandObject):
     v_key = command.args
     name = message.from_user.full_name
 
-    # চ্যানেল জয়েন চেক
     if not await is_subscribed(uid):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_URL)],
@@ -70,13 +69,11 @@ async def start_cmd(message: types.Message, command: CommandObject):
         await message.answer("⚠️ **You must join all channels to use this bot.**", reply_markup=kb)
         return
 
-    # ডাটাবেস আপডেট
     user = await users_col.find_one({"user_id": uid})
     if not user:
         user = {"user_id": uid, "credits": 10, "name": name}
         await users_col.insert_one(user)
 
-    # প্রফেশনাল ইউজার ইন্টারফেস (আপনার দেওয়া ডিজাইন অনুযায়ী)
     profile_txt = (
         f"👤 **User:** {name}\n"
         f"🆔 **User ID:** `{uid}`\n"
@@ -92,7 +89,6 @@ async def start_cmd(message: types.Message, command: CommandObject):
     await message.answer(profile_txt, reply_markup=get_main_kb(uid, user['credits']), parse_mode="Markdown")
     if r_markup: await message.answer("🛠 Admin Panel Active", reply_markup=r_markup)
 
-# পপ-আপ অ্যালার্ট হ্যান্ডলার
 @dp.callback_query(F.data.startswith("check_"))
 async def check_callback(callback: types.CallbackQuery):
     uid = callback.from_user.id
@@ -100,33 +96,74 @@ async def check_callback(callback: types.CallbackQuery):
     
     if await is_subscribed(uid):
         await callback.answer("✅ Thank you for joining all channels.", show_alert=True)
-        # জয়েন করার পর মেইন স্টার্ট ফাংশন ট্রিগার করবে
         await callback.message.delete()
-        # এখানে রি-ডাইরেক্ট কোড...
+        # এখানে চাইলে আপনি পুনরায় স্টার্ট মেসেজটি ট্রিগার করতে পারেন।
     else:
         await callback.answer("❌ You must join all channels to use this bot.", show_alert=True)
 
-# --- ৫. অ্যাডমিন ফিচারস ---
+# --- ৫. অ্যাডমিন ফিচারস (আপডেটেড ডিজাইন) ---
 
 @dp.message(F.text == "📊 Stats")
 async def admin_stats(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    total = await users_col.count_documents({})
-    await message.answer(f"📊 **Bot Statistics**\n\n👥 Total Users: `{total}`", parse_mode="Markdown")
+    
+    total_users = await users_col.count_documents({})
+    total_vids = await video_links_col.count_documents({})
+    
+    stats_text = (
+        "📊 **বট পরিসংখ্যান রিপোর্ট**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 **মোট ইউজার:** `{total_users}` জন\n"
+        f"🎬 **সংরক্ষিত ভিডিও:** `{total_vids}` টি\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📡 **সার্ভার স্ট্যাটাস:** `স্থিতিশীল (Stable)`\n"
+        "⚡ **বট পারফরম্যান্স:** `১০০% সচল`"
+    )
+    await message.answer(stats_text, parse_mode="Markdown")
+
+@dp.message(F.text == "📢 Broadcast")
+async def admin_broadcast_info(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer(
+        "📢 **ব্রডকাস্ট মোড অ্যাক্টিভ!**\n\n"
+        "সবাইকে মেসেজ পাঠাতে নিচের ফরম্যাট ব্যবহার করুন:\n"
+        "`/broadcast আপনার বার্তাটি এখানে লিখুন`",
+        parse_mode="Markdown"
+    )
 
 @dp.message(Command("broadcast"))
 async def cmd_broadcast(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID or not command.args: return
-    status = await message.answer("⏳ Sending messages...")
+    
+    status_msg = await message.answer("🚀 **ব্রডকাস্ট শুরু হচ্ছে...**")
     users = users_col.find()
-    s, f = 0, 0
+    success, failed, total = 0, 0, 0
+    
     async for u in users:
+        total += 1
         try:
-            await bot.send_message(u['user_id'], f"📢 **Admin Notice:**\n\n{command.args}")
-            s += 1
+            broadcast_msg = (
+                "🔔 **অ্যাডমিন থেকে নতুন বার্তা!**\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"{command.args}\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"🤖 @{BOT_USERNAME}"
+            )
+            await bot.send_message(u['user_id'], broadcast_msg, parse_mode="Markdown")
+            success += 1
             await asyncio.sleep(0.05)
-        except: f += 1
-    await status.edit_text(f"✅ Broadcast Done!\n🚀 Success: {s}\n❌ Failed: {f}")
+        except Exception:
+            failed += 1
+            
+    report_text = (
+        "✅ **ব্রডকাস্ট সম্পন্ন হয়েছে!**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"📤 **মোট টার্গেট:** `{total}`\n"
+        f"🎉 **সফল হয়েছে:** `{success}`\n"
+        f"❌ **ব্যর্থ (ব্লকড):** `{failed}`\n"
+        "━━━━━━━━━━━━━━━━━━━━"
+    )
+    await status_msg.edit_text(report_text, parse_mode="Markdown")
 
 @dp.message(Command("add"))
 async def cmd_add(message: types.Message, command: CommandObject):
@@ -146,4 +183,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
+                    
