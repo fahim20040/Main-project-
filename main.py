@@ -27,7 +27,7 @@ db = client['video_bot_db']
 users_col = db['users']
 video_links_col = db['video_links']
 
-async def handle(request): return web.Response(text="OK")
+async def handle(request): return web.Response(text="Bot is Live!")
 async def start_fake_server():
     app = web.Application()
     app.router.add_get('/', handle)
@@ -92,16 +92,13 @@ async def start_cmd(message: types.Message, command: CommandObject):
 @dp.callback_query(F.data.startswith("check_"))
 async def check_callback(callback: types.CallbackQuery):
     uid = callback.from_user.id
-    v_key = callback.data.split("_")[1]
-    
     if await is_subscribed(uid):
-        await callback.answer("✅ Thank you for joining all channels.", show_alert=True)
+        await callback.answer("✅ Thank you for joining!", show_alert=True)
         await callback.message.delete()
-        # এখানে চাইলে আপনি পুনরায় স্টার্ট মেসেজটি ট্রিগার করতে পারেন।
     else:
-        await callback.answer("❌ You must join all channels to use this bot.", show_alert=True)
+        await callback.answer("❌ You must join all channels first!", show_alert=True)
 
-# --- ৫. অ্যাডমিন ফিচারস (আপডেটেড ডিজাইন) ---
+# --- ৫. অ্যাডমিন ফিচারস (সমাধানকৃত ও প্রফেশনাল) ---
 
 @dp.message(F.text == "📊 Stats")
 async def admin_stats(message: types.Message):
@@ -111,31 +108,31 @@ async def admin_stats(message: types.Message):
     total_vids = await video_links_col.count_documents({})
     
     stats_text = (
-        "📊 **বট পরিসংখ্যান রিপোর্ট**\n"
+        "✨ **প্রিমিয়াম বট রিপোর্ট** ✨\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"👥 **মোট ইউজার:** `{total_users}` জন\n"
         f"🎬 **সংরক্ষিত ভিডিও:** `{total_vids}` টি\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "📡 **সার্ভার স্ট্যাটাস:** `স্থিতিশীল (Stable)`\n"
-        "⚡ **বট পারফরম্যান্স:** `১০০% সচল`"
+        "📡 **সার্ভার:** `স্থিতিশীল (Stable)`\n"
+        "⚡ **পারফরম্যান্স:** `১০০% সচল`"
     )
     await message.answer(stats_text, parse_mode="Markdown")
 
 @dp.message(F.text == "📢 Broadcast")
-async def admin_broadcast_info(message: types.Message):
+async def admin_broadcast_prompt(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer(
         "📢 **ব্রডকাস্ট মোড অ্যাক্টিভ!**\n\n"
-        "সবাইকে মেসেজ পাঠাতে নিচের ফরম্যাট ব্যবহার করুন:\n"
-        "`/broadcast আপনার বার্তাটি এখানে লিখুন`",
+        "সবাইকে মেসেজ পাঠাতে নিচের মতো করে লিখুন:\n"
+        "`/send আপনার জরুরি মেসেজটি`",
         parse_mode="Markdown"
     )
 
-@dp.message(Command("broadcast"))
-async def cmd_broadcast(message: types.Message, command: CommandObject):
+@dp.message(Command("send"))
+async def process_broadcast(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID or not command.args: return
     
-    status_msg = await message.answer("🚀 **ব্রডকাস্ট শুরু হচ্ছে...**")
+    prog_msg = await message.answer("🚀 **ব্রডকাস্ট শুরু হচ্ছে...**")
     users = users_col.find()
     success, failed, total = 0, 0, 0
     
@@ -152,18 +149,18 @@ async def cmd_broadcast(message: types.Message, command: CommandObject):
             await bot.send_message(u['user_id'], broadcast_msg, parse_mode="Markdown")
             success += 1
             await asyncio.sleep(0.05)
-        except Exception:
+        except:
             failed += 1
-            
-    report_text = (
-        "✅ **ব্রডকাস্ট সম্পন্ন হয়েছে!**\n"
+    
+    report_txt = (
+        "✅ **ব্রডকাস্ট সম্পন্ন!**\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"📤 **মোট টার্গেট:** `{total}`\n"
-        f"🎉 **সফল হয়েছে:** `{success}`\n"
-        f"❌ **ব্যর্থ (ব্লকড):** `{failed}`\n"
+        f"🎉 **সফল:** `{success}`\n"
+        f"❌ **ব্যর্থ:** `{failed}`\n"
         "━━━━━━━━━━━━━━━━━━━━"
     )
-    await status_msg.edit_text(report_text, parse_mode="Markdown")
+    await prog_msg.edit_text(report_txt, parse_mode="Markdown")
 
 @dp.message(Command("add"))
 async def cmd_add(message: types.Message, command: CommandObject):
@@ -177,10 +174,20 @@ async def cmd_add(message: types.Message, command: CommandObject):
         except: pass
     except: await message.answer("❌ Format: `/add ID Amount` (Use - for minus)")
 
+# --- ৬. রান ফাংশন (Conflict Error ফিক্স) ---
 async def main():
+    # আগের সব সেশন ডিলিট করে নতুন করে শুরু করবে
     await bot.delete_webhook(drop_pending_updates=True)
-    await asyncio.gather(start_fake_server(), dp.start_polling(bot))
+    logging.info("Old sessions cleared. Bot starting...")
+    
+    await asyncio.gather(
+        start_fake_server(),
+        dp.start_polling(bot)
+    )
 
 if __name__ == "__main__":
-    asyncio.run(main())
-                    
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Bot stopped!")
+        
