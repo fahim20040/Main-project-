@@ -9,7 +9,7 @@ from aiogram.filters import CommandStart, Command, CommandObject
 from motor.motor_asyncio import AsyncIOMotorClient
 from aiohttp import web
 
-# --- ১. কনফিগারেশন (আপনার নতুন টোকেন যুক্ত করা হয়েছে) ---
+# --- ১. কনফিগারেশন ---
 API_TOKEN = '8565287860:AAE933txE_spAzMUyhXsoh1yTx6itRu3iKI'
 MONGO_URL = "mongodb+srv://itsmeratul3_db_user:j3XwaF5yZmbfPbYQ@mybotdatabase.5m5engl.mongodb.net/?appName=MyBotDatabase"
 ADMIN_ID = 6793604200
@@ -27,7 +27,6 @@ db = client['video_bot_db']
 users_col = db['users']
 video_links_col = db['video_links']
 
-# Render Keep-Alive Server
 async def handle(request): return web.Response(text="Bot is running!")
 async def start_fake_server():
     app = web.Application()
@@ -55,14 +54,15 @@ def get_admin_kb():
         [KeyboardButton(text="➕ Manage Credits")]
     ], resize_keyboard=True)
 
-# --- ৪. মেইন লজিক ---
+# --- ৪. মেইন লজিক (এখানে ভিডিও লিঙ্ক পাঠানোর লজিক যোগ করা হয়েছে) ---
 
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, command: CommandObject):
     uid = message.from_user.id
-    v_key = command.args
+    v_key = command.args # লিঙ্ক থেকে আসা ভিডিও কি
     name = message.from_user.full_name
 
+    # সাবস্ক্রিপশন চেক
     if not await is_subscribed(uid):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_URL)],
@@ -71,11 +71,29 @@ async def start_cmd(message: types.Message, command: CommandObject):
         await message.answer("⚠️ **You must join all channels to use this bot.**", reply_markup=kb)
         return
 
+    # ইউজার ডাটা হ্যান্ডেল
     user = await users_col.find_one({"user_id": uid})
     if not user:
         user = {"user_id": uid, "credits": 10, "name": name}
         await users_col.insert_one(user)
 
+    # যদি ইউজার কোনো ভিডিও লিঙ্ক (v_key) এর মাধ্যমে আসে
+    if v_key:
+        v_data = await video_links_col.find_one({"video_key": v_key})
+        if v_data:
+            if user['credits'] > 0:
+                # ভিডিও পাঠিয়ে দেওয়া
+                await message.answer_video(
+                    video=v_data['file_id'], 
+                    caption=f"🎬 **ভিডিও রেডি!**\n💰 আপনার ক্রেডিট: {user['credits'] - 1}"
+                )
+                await users_col.update_one({"user_id": uid}, {"$inc": {"credits": -1}})
+                return # ভিডিও পাঠানো হলে এখানেই শেষ
+            else:
+                await message.answer("⚠️ আপনার ক্রেডিট শেষ! দয়া করে ক্রেডিট কিনুন।")
+                return
+
+    # লিঙ্ক ছাড়া সরাসরি বটে আসলে প্রোফাইল দেখাবে
     profile_txt = (
         f"👤 **User:** {name}\n"
         f"🆔 **User ID:** `{uid}`\n"
@@ -98,15 +116,13 @@ async def check_callback(callback: types.CallbackQuery):
     else:
         await callback.answer("❌ Please join the channel first!", show_alert=True)
 
-# --- ৫. অ্যাডমিন ফিচারস (Stats & Broadcast ফিক্স) ---
+# --- ৫. অ্যাডমিন ফিচারস ---
 
 @dp.message(F.text == "📊 Stats")
 async def admin_stats_fixed(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    
     total_users = await users_col.count_documents({})
     total_vids = await video_links_col.count_documents({})
-    
     report = (
         "📊 **System Status Report**\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
@@ -120,36 +136,19 @@ async def admin_stats_fixed(message: types.Message):
 @dp.message(F.text == "📢 Broadcast")
 async def admin_broadcast_fixed(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    await message.answer(
-        "📢 **Broadcast Mode Active**\n\n"
-        "To send a message to everyone, use:\n"
-        "`/send Your Message Here`",
-        parse_mode="Markdown"
-    )
+    await message.answer("📢 **Broadcast Mode Active**\n\nTo send a message, use:\n`/send Your Message`", parse_mode="Markdown")
 
 @dp.message(Command("send"))
 async def process_send(message: types.Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID or not command.args: return
-    
     status = await message.answer("⏳ Sending...")
-    users = users_col.find()
-    s, f = 0, 0
-    
+    users = users_col.find(); s, f = 0, 0
     async for u in users:
         try:
-            # ইউনিক ডিজাইনড মেসেজ
-            msg = (
-                "📢 **New Announcement**\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"{command.args}\n\n"
-                "━━━━━━━━━━━━━━━━━━━━"
-            )
+            msg = f"📢 **New Announcement**\n━━━━━━━━━━━━━━━━━━━━\n\n{command.args}\n\n━━━━━━━━━━━━━━━━━━━━"
             await bot.send_message(u['user_id'], msg, parse_mode="Markdown")
-            s += 1
-            await asyncio.sleep(0.05)
-        except:
-            f += 1
-            
+            s += 1; await asyncio.sleep(0.05)
+        except: f += 1
     await status.edit_text(f"✅ **Sent!**\n🚀 Success: `{s}`\n❌ Failed: `{f}`")
 
 @dp.message(Command("add"))
@@ -160,15 +159,13 @@ async def cmd_add(message: types.Message, command: CommandObject):
         target_id, amount = int(args[0]), int(args[1])
         await users_col.update_one({"user_id": target_id}, {"$inc": {"credits": amount}})
         await message.answer(f"✅ ID `{target_id}` added `{amount}` credits.")
-    except:
-        await message.answer("❌ Format: `/add ID Amount`")
+    except: await message.answer("❌ Format: `/add ID Amount`")
 
-# --- ৬. রানার (Conflict ফিক্সড) ---
+# --- ৬. রানার ---
 async def main():
-    # সেশন ক্লিয়ারেন্স
     await bot.delete_webhook(drop_pending_updates=True)
     await asyncio.gather(start_fake_server(), dp.start_polling(bot))
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+                
