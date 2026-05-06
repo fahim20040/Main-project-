@@ -20,10 +20,10 @@ from aiohttp import web
 
 
 # =========================
-# CONFIG
+# CONFIG (Fixed os.getenv issues)
 # =========================
-API_TOKEN = os.getenv("8565287860:AAHqxvFGov9qwtFcmI78qVmB_KFf-24ZJ9o")
-MONGO_URL = os.getenv("mongodb+srv://itsmeratul3_db_user:<db_password>@mybotdatabase.5m5engl.mongodb.net/?appName=MyBotDatabase")
+API_TOKEN = "8565287860:AAHqxvFGov9qwtFcmI78qVmB_KFf-24ZJ9o"
+MONGO_URL = "mongodb+srv://itsmeratul3_db_user:db_password@mybotdatabase.5m5engl.mongodb.net/?appName=MyBotDatabase"
 
 ADMIN_ID = 6793604200
 CHANNEL_ID = -1003960638119
@@ -59,7 +59,8 @@ async def start_fake_server():
     app.router.add_get("/", handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080)))
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
 
@@ -70,19 +71,14 @@ user_last_action = {}
 
 async def check_user_status(user_id):
     now = time.time()
-
     if user_id in user_last_action:
         if now - user_last_action[user_id] < 1:
             return "spam"
-
     user_last_action[user_id] = now
-
     user = await users_col.find_one({"user_id": user_id})
     if user and user.get("is_banned"):
         return "banned"
-
     return "ok"
-
 
 async def update_last_seen(user_id):
     await users_col.update_one(
@@ -91,10 +87,8 @@ async def update_last_seen(user_id):
         upsert=True
     )
 
-
 def get_refer_link(uid):
     return f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
-
 
 async def is_subscribed(user_id):
     try:
@@ -102,7 +96,6 @@ async def is_subscribed(user_id):
         return m.status in ["member", "administrator", "creator"]
     except:
         return False
-
 
 async def auto_delete(chat_id, msg_id):
     await asyncio.sleep(300)
@@ -143,17 +136,17 @@ async def start_cmd(message: types.Message, command: CommandObject):
         return
 
     user = await users_col.find_one({"user_id": uid})
-
     if not user:
         if args and args.startswith("ref_"):
-            ref_id = int(args.split("_")[1])
-            if ref_id != uid:
-                await users_col.update_one(
-                    {"user_id": ref_id},
-                    {"$inc": {"credits": 5}},
-                    upsert=True
-                )
-
+            ref_id_str = args.split("_")[1]
+            if ref_id_str.isdigit():
+                ref_id = int(ref_id_str)
+                if ref_id != uid:
+                    await users_col.update_one(
+                        {"user_id": ref_id},
+                        {"$inc": {"credits": 5}},
+                        upsert=True
+                    )
         await users_col.insert_one({
             "user_id": uid,
             "credits": 10,
@@ -165,13 +158,13 @@ async def start_cmd(message: types.Message, command: CommandObject):
 
 
 # =========================
-# WALLET (FULL UI RESTORED)
+# WALLET
 # =========================
 @dp.message(F.text.in_(["Check your wallet", "/wallet"]))
 async def wallet_handler(message: types.Message):
     uid = message.from_user.id
-    user = await users_col.find_one({"user_id": uid})
-
+    user = await users_col.find_one({"user_id": uid}) or {}
+    
     wallet_txt = (
         f"👤 **User:** {message.from_user.full_name}\n"
         f"🆔 **User ID:** `{uid}`\n"
@@ -184,56 +177,10 @@ async def wallet_handler(message: types.Message):
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="🤝 Refer & Earn",
-                url=f"https://t.me/share/url?url={get_refer_link(uid)}"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="💎 Buy Credits",
-                url=f"https://t.me/{ADMIN_USERNAME}"
-            )
-        ]
+        [InlineKeyboardButton(text="🤝 Refer & Earn", url=f"https://t.me/share/url?url={get_refer_link(uid)}")],
+        [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{ADMIN_USERNAME}")]
     ])
-
     await message.answer(wallet_txt, reply_markup=kb, parse_mode="Markdown")
-
-
-# =========================
-# OUT OF CREDITS (FULL BEAUTIFUL UI)
-# =========================
-def out_of_credit_message():
-    return (
-        "🚨 **Oops! You're out of credits!** 🥲\n\n"
-        "💡 But don't worry — getting more is super easy:\n"
-        "1️⃣ Tap the button below 👇\n"
-        "2️⃣ Complete a quick task ✅\n"
-        "3️⃣ Instantly receive **10 free credits** to use the bot! 🚀\n\n"
-        "🆓 100% FREE — every single time!\n"
-        "🔄 You can earn **10 credits** again and again!\n\n"
-        "📌 **Need help?** Check out our tutorial guide!\n\n"
-        "🛠 **Facing issues?** Message support from admin.\n\n"
-        "Let's keep the fun going! 🎉💥"
-    )
-
-
-def out_of_credit_buttons(uid):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="🚀 Refer & Earn 5 Credits",
-                url=f"https://t.me/share/url?url={get_refer_link(uid)}"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="❓ How to Use Bot",
-                url="https://t.me/genzexposed"
-            )
-        ]
-    ])
 
 
 # =========================
@@ -243,13 +190,10 @@ def out_of_credit_buttons(uid):
 async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
-
     total = await users_col.count_documents({})
     cpu = psutil.cpu_percent()
     ram = psutil.virtual_memory().percent
-
     uptime = int(time.time() - START_TIME)
-
     text = (
         "⚡ SYSTEM STATUS\n"
         "━━━━━━━━━━━━━━\n"
@@ -258,13 +202,10 @@ async def admin_panel(message: types.Message):
         f"🧠 RAM: {ram}%\n"
         f"⏱ Uptime: {uptime}s"
     )
-
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Refresh", callback_data="refresh_admin")]
     ])
-
     await message.answer(text, reply_markup=kb)
-
 
 @dp.callback_query(F.data == "refresh_admin")
 async def refresh(call: types.CallbackQuery):
@@ -280,33 +221,27 @@ async def refresh(call: types.CallbackQuery):
 @dp.message(F.video & (F.from_user.id == ADMIN_ID))
 async def save_video(message: types.Message):
     key = f"vid{random.randint(1000,9999)}"
-
     await video_links_col.insert_one({
         "video_key": key,
         "file_id": message.video.file_id
     })
-
     link = f"https://t.me/{BOT_USERNAME}?start={key}"
     await message.answer(f"✅ Saved!\n{link}")
 
-async def start_fake_server():
-    app = web.Application()
-    app.router.add_get("/", lambda r: web.Response(text="Bot is Running"))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.getenv("PORT", 10000))
-    await web.TCPSite(runner, '0.0.0.0', port).start()
-    
 
 # =========================
-# RUN
+# RUN (Fixed Indentation & Missing Brackets)
 # =========================
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await asyncio.gather(
         start_fake_server(),
         dp.start_polling(bot)
-    
+    )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Bot stopped")
+        
