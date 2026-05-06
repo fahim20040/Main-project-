@@ -2,3 +2,4 @@ aiogram
 motor
 dnspython
 aiohttp
+psutil
