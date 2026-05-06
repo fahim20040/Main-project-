@@ -20,7 +20,7 @@ from aiohttp import web
 
 
 # =========================
-# CONFIG (Fixed os.getenv issues)
+# CONFIG
 # =========================
 API_TOKEN = "8565287860:AAHqxvFGov9qwtFcmI78qVmB_KFf-24ZJ9o"
 MONGO_URL = "mongodb+srv://itsmeratul3_db_user:Ratul1234@mybotdatabase.5m5engl.mongodb.net/?retryWrites=true&w=majority"
@@ -119,7 +119,7 @@ def get_main_menu():
 
 
 # =========================
-# START COMMAND
+# START COMMAND (Fixed for Video Delivery)
 # =========================
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, command: CommandObject):
@@ -127,6 +127,7 @@ async def start_cmd(message: types.Message, command: CommandObject):
     args = command.args
     name = message.from_user.full_name
 
+    # সাবস্ক্রিপশন চেক
     if not await is_subscribed(uid):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_URL)],
@@ -135,18 +136,31 @@ async def start_cmd(message: types.Message, command: CommandObject):
         await message.answer("⚠️ You must join channel first", reply_markup=kb)
         return
 
+    # ১. যদি লিঙ্কে ভিডিওর কী (vid) থাকে তবে ভিডিও পাঠানো
+    if args and args.startswith("vid"):
+        video_data = await video_links_col.find_one({"video_key": args})
+        if video_data:
+            await bot.send_video(chat_id=uid, video=video_data["file_id"])
+            return
+        else:
+            await message.answer("❌ Invalid or expired video link.")
+            return
+
+    # ২. ইউজার রেজিস্ট্রেশন ও রেফারেল হ্যান্ডেলিং
     user = await users_col.find_one({"user_id": uid})
     if not user:
         if args and args.startswith("ref_"):
-            ref_id_str = args.split("_")[1]
-            if ref_id_str.isdigit():
-                ref_id = int(ref_id_str)
+            try:
+                ref_id = int(args.split("_")[1])
                 if ref_id != uid:
                     await users_col.update_one(
                         {"user_id": ref_id},
                         {"$inc": {"credits": 5}},
                         upsert=True
                     )
+            except:
+                pass
+
         await users_col.insert_one({
             "user_id": uid,
             "credits": 10,
@@ -230,7 +244,7 @@ async def save_video(message: types.Message):
 
 
 # =========================
-# RUN (Fixed Indentation & Missing Brackets)
+# RUN
 # =========================
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
@@ -244,4 +258,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logging.info("Bot stopped")
-        
+    
