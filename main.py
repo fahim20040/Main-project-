@@ -23,7 +23,7 @@ from aiohttp import web
 # CONFIG (Fixed os.getenv issues)
 # =========================
 API_TOKEN = "8565287860:AAHqxvFGov9qwtFcmI78qVmB_KFf-24ZJ9o"
-MONGO_URL = "mongodb+srv://itsmeratul234_db_user:db_password@mybotdatabase.5m5engl.mongodb.net/?appName=MyBotDatabase"
+MONGO_URL = "mongodb+srv://itsmeratul3_db_user:Ratul1234@mybotdatabase.5m5engl.mongodb.net/?retryWrites=true&w=majority"
 
 ADMIN_ID = 6793604200
 CHANNEL_ID = -1003960638119
