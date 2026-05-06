@@ -289,6 +289,14 @@ async def save_video(message: types.Message):
     link = f"https://t.me/{BOT_USERNAME}?start={key}"
     await message.answer(f"✅ Saved!\n{link}")
 
+async def start_fake_server():
+    app = web.Application()
+    app.router.add_get("/", lambda r: web.Response(text="Bot is Running"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 10000))
+    await web.TCPSite(runner, '0.0.0.0', port).start()
+    
 
 # =========================
 # RUN
@@ -298,7 +306,7 @@ async def main():
     await asyncio.gather(
         start_fake_server(),
         dp.start_polling(bot)
-    )
+    
 
 if __name__ == "__main__":
     asyncio.run(main())
