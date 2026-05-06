@@ -10,7 +10,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from aiohttp import web
 
 # --- ১. কনফিগারেশন ---
-API_TOKEN = '8565287860:AAE933txE_spAzMUyhXsoh1yTx6itRu3iKI'
+API_TOKEN = '8565287860:AAG04XiztZaZhoPoe8myVGpvAeQmIOyKW1Y'
 MONGO_URL = "mongodb+srv://itsmeratul3_db_user:j3XwaF5yZmbfPbYQ@mybotdatabase.5m5engl.mongodb.net/?appName=MyBotDatabase"
 ADMIN_ID = 6793604200
 CHANNEL_ID = -1003960638119 
