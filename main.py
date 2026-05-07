@@ -59,9 +59,13 @@ async def start_fake_server():
     app.router.add_get("/", handle)
     runner = web.AppRunner(app)
     await runner.setup()
+    # VPS এর জন্য পোর্ট পরিবর্তনশীল হতে পারে, তাই default ১০০০০ রাখা হয়েছে
     port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
+    try:
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+    except Exception as e:
+        logging.error(f"Web server error: {e}")
 
 
 # =========================
@@ -81,6 +85,7 @@ async def check_user_status(user_id):
     return "ok"
 
 async def update_last_seen(user_id):
+    # upsert: True রাখা হয়েছে যাতে নতুন ইউজার হলেও আপডেট হয়
     await users_col.update_one(
         {"user_id": user_id},
         {"$set": {"last_seen": datetime.utcnow()}},
@@ -94,14 +99,16 @@ async def is_subscribed(user_id):
     try:
         m = await bot.get_chat_member(CHANNEL_ID, user_id)
         return m.status in ["member", "administrator", "creator"]
-    except:
+    except Exception:
         return False
 
-async def auto_delete(chat_id, msg_id):
-    await asyncio.sleep(300)
+# অটো ডিলিট ফাংশন (১০ মিনিট = ৬০০ সেকেন্ড)
+async def auto_delete_video(chat_id, msg_id, seconds=600):
+    await asyncio.sleep(seconds)
     try:
         await bot.delete_message(chat_id, msg_id)
-    except:
+    except Exception:
+        # মেসেজ ইতিমধ্যে ইউজার ডিলিট করলে বা না পাওয়া গেলে যাতে এরর না দেয়
         pass
 
 
@@ -119,7 +126,7 @@ def get_main_menu():
 
 
 # =========================
-# START COMMAND (Fixed for Video Delivery)
+# START COMMAND
 # =========================
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, command: CommandObject):
@@ -127,26 +134,34 @@ async def start_cmd(message: types.Message, command: CommandObject):
     args = command.args
     name = message.from_user.full_name
 
-    # সাবস্ক্রিপশন চেক
     if not await is_subscribed(uid):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_URL)],
             [InlineKeyboardButton(text="📁 Check Again", callback_data=f"check_{args or 'none'}")]
         ])
+        # UI পরিবর্তন করা হয়নি
         await message.answer("⚠️ You must join channel first", reply_markup=kb)
         return
 
-    # ১. যদি লিঙ্কে ভিডিওর কী (vid) থাকে তবে ভিডিও পাঠানো
+    # ১. ভিডিও ডেলিভারি এবং ১০ মিনিট পর অটো ডিলিট
     if args and args.startswith("vid"):
         video_data = await video_links_col.find_one({"video_key": args})
         if video_data:
-            await bot.send_video(chat_id=uid, video=video_data["file_id"])
+            # ভিডিও পাঠানো
+            sent_video = await bot.send_video(chat_id=uid, video=video_data["file_id"])
+            
+            # সতর্কতা মেসেজ
+            notif_msg = await message.answer("⚠️ **Security Alert:** This video will be automatically deleted in **10 minutes**.")
+            
+            # ডিলিট টাস্ক শুরু (৬০০ সেকেন্ড)
+            asyncio.create_task(auto_delete_video(uid, sent_video.message_id, 600))
+            asyncio.create_task(auto_delete_video(uid, notif_msg.message_id, 600))
             return
         else:
             await message.answer("❌ Invalid or expired video link.")
             return
 
-    # ২. ইউজার রেজিস্ট্রেশন ও রেফারেল হ্যান্ডেলিং
+    # ২. ইউজার রেজিস্ট্রেশন
     user = await users_col.find_one({"user_id": uid})
     if not user:
         if args and args.startswith("ref_"):
@@ -164,7 +179,8 @@ async def start_cmd(message: types.Message, command: CommandObject):
         await users_col.insert_one({
             "user_id": uid,
             "credits": 10,
-            "name": name
+            "name": name,
+            "joined_at": datetime.utcnow()
         })
 
     await update_last_seen(uid)
@@ -247,15 +263,19 @@ async def save_video(message: types.Message):
 # RUN
 # =========================
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await asyncio.gather(
-        start_fake_server(),
-        dp.start_polling(bot)
-    )
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        # VPS এ বট চালানোর জন্য polling মেথডই সবথেকে নিরাপদ
+        await asyncio.gather(
+            start_fake_server(),
+            dp.start_polling(bot)
+        )
+    except Exception as e:
+        logging.error(f"Bot Main loop error: {e}")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         logging.info("Bot stopped")
-    
+        
