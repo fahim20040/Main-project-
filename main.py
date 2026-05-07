@@ -196,31 +196,57 @@ async def start_cmd(message: types.Message, command: CommandObject):
     except TelegramBadRequest:
         await message.answer(f"Welcome {name}!", reply_markup=get_main_menu())
 
+
+# --- Wallet Handler (যখন ইউজার 'Check your wallet' এ ক্লিক করবে) ---
 @dp.message(F.text.in_(["Check your wallet", "/wallet"]))
 async def wallet_handler(message: types.Message):
-    """✅ Wallet handler"""
-    uid = message.from_user.id
-    user = await users_col.find_one({"user_id": uid}) or {"credits": 0}
+    await send_wallet_info(message)
+
+# --- Callback Handler (যখন ইউজার বাটনে ক্লিক করবে) ---
+@dp.callback_query(lambda c: c.data in ["refer_info", "buy_credits"])
+async def wallet_callback_handler(callback_query: types.CallbackQuery):
+    await send_wallet_info(callback_query.message)
+    await callback_query.answer()
+
+# --- কমন ফাংশন যা বাটন এবং টেক্সট পাঠাবে ---
+async def send_wallet_info(message: types.Message):
+    uid = message.chat.id if message.chat else message.from_user.id
+    user = await users_col.find_one({"user_id": uid})
     
-    wallet_txt = (
-        f"👤 **User:** {message.from_user.full_name}\n"
+    # ডাটাবেস থেকে রিয়েল টাইম ক্রেডিট চেক (এডমিন বাড়ালে এখানে বাড়বে)
+    current_credits = user.get("credits", 0) if user else 0
+    
+    # আপনার দেওয়া ইউজারনেমগুলো
+    bot_username = "Genz2027bot"
+    admin_username = "artist_x0"
+    
+    # রেফারেল ও শেয়ার লিঙ্ক
+    refer_link = f"https://t.me/{bot_username}?start=ref_{uid}"
+    share_text = f"https://t.me/share/url?url={refer_link}&text=বটটি ব্যবহার করে ফ্রি ক্রেডিট পান এবং প্রিমিয়াম ভিডিও দেখুন!"
+
+    # বাটন সেটআপ
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🤝 Refer & Earn", url=share_text)],
+        [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{admin_username}")]
+    ])
+
+    # আপনার দেওয়া হুবহু ফরম্যাট
+    text = (
+        f"👤 **User:** {message.chat.full_name if message.chat.full_name else 'User'}\n"
         f"🆔 **User ID:** `{uid}`\n"
         "━━━━━━━━━━━━━━━━━\n"
-        f"💰 **Credits:** {user.get('credits', 0)}\n\n"
-        "✨ **Earn more credits:**\n"
-        "• Watch ads (10 credits)\n"
-        "• Refer friends (5 credits each)\n"
-        "• Buy from admin\n\n"
-        f"👨‍💼 **Admin:** @{ADMIN_USERNAME}"
+        f"💰 **Credits:** {current_credits}\n"
+        "━━━━━━━━━━━━━━━━━\n"
+        "✨ **Note:** You can earn 10 free credits every time you watch a short ad.\n\n"
+        "💸 Don't want to watch ads? You can also buy credits directly from the button below.\n\n"
+        "🎉 Let's keep the fun going!"
     )
     
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🤝 Refer & Earn", url=f"https://t.me/share/url?url={get_refer_link(uid)}")],
-        [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{ADMIN_USERNAME}")],
-        [InlineKeyboardButton(text="📢 Our Channel", url=CHANNEL_URL)]
-    ])
-    
-    await message.answer(wallet_txt, reply_markup=kb, parse_mode="Markdown")
+    try:
+        await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    except:
+        await message.answer(text.replace("`", ""), reply_markup=kb)
+
 
 # ✅ ADMIN COMMANDS - FIXED
 @dp.message(Command("add"))
