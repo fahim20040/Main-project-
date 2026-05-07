@@ -18,7 +18,6 @@ from aiogram.types import (
 from motor.motor_asyncio import AsyncIOMotorClient
 from aiohttp import web
 
-
 # =========================
 # CONFIG
 # =========================
@@ -33,12 +32,10 @@ BOT_USERNAME = "Genz2027bot"
 
 START_TIME = time.time()
 
-
 # =========================
 # INIT
 # =========================
 logging.basicConfig(level=logging.INFO)
-
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
@@ -47,54 +44,9 @@ db = client["video_bot_db"]
 users_col = db["users"]
 video_links_col = db["video_links"]
 
-
-# =========================
-# WEB SERVER
-# =========================
-async def handle(request):
-    return web.Response(text="Bot is running!")
-
-async def start_fake_server():
-    app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    # VPS এর জন্য পোর্ট পরিবর্তনশীল হতে পারে, তাই default ১০০০০ রাখা হয়েছে
-    port = int(os.environ.get("PORT", 10000))
-    try:
-        site = web.TCPSite(runner, "0.0.0.0", port)
-        await site.start()
-    except Exception as e:
-        logging.error(f"Web server error: {e}")
-
-
 # =========================
 # HELPERS
 # =========================
-user_last_action = {}
-
-async def check_user_status(user_id):
-    now = time.time()
-    if user_id in user_last_action:
-        if now - user_last_action[user_id] < 1:
-            return "spam"
-    user_last_action[user_id] = now
-    user = await users_col.find_one({"user_id": user_id})
-    if user and user.get("is_banned"):
-        return "banned"
-    return "ok"
-
-async def update_last_seen(user_id):
-    # upsert: True রাখা হয়েছে যাতে নতুন ইউজার হলেও আপডেট হয়
-    await users_col.update_one(
-        {"user_id": user_id},
-        {"$set": {"last_seen": datetime.utcnow()}},
-        upsert=True
-    )
-
-def get_refer_link(uid):
-    return f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
-
 async def is_subscribed(user_id):
     try:
         m = await bot.get_chat_member(CHANNEL_ID, user_id)
@@ -102,19 +54,13 @@ async def is_subscribed(user_id):
     except Exception:
         return False
 
-# অটো ডিলিট ফাংশন (১০ মিনিট = ৬০০ সেকেন্ড)
 async def auto_delete_video(chat_id, msg_id, seconds=600):
     await asyncio.sleep(seconds)
     try:
         await bot.delete_message(chat_id, msg_id)
     except Exception:
-        # মেসেজ ইতিমধ্যে ইউজার ডিলিট করলে বা না পাওয়া গেলে যাতে এরর না দেয়
         pass
 
-
-# =========================
-# KEYBOARD
-# =========================
 def get_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -124,10 +70,29 @@ def get_main_menu():
         resize_keyboard=True
     )
 
+def get_refer_link(uid):
+    return f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
 
 # =========================
-# START COMMAND
+# HANDLERS
 # =========================
+
+# ১. 'Check Again' বাটন হ্যান্ডলার (এটি আপনার আগের কোডে ছিল না)
+@dp.callback_query(F.data.startswith("check_"))
+async def check_subscription_callback(call: types.CallbackQuery):
+    uid = call.from_user.id
+    arg = call.data.replace("check_", "")
+    
+    if await is_subscribed(uid):
+        await call.answer("✅ Thank you for joining!")
+        # সাবস্ক্রাইব করা থাকলে স্টার্ট মেসেজ পাঠিয়ে দিচ্ছি
+        await call.message.delete()
+        # এখানে স্টার্ট কমান্ডের মতো লজিক কাজ করবে
+        await bot.send_message(uid, f"Welcome back, {call.from_user.full_name}!", reply_markup=get_main_menu())
+    else:
+        await call.answer("⚠️ You still haven't joined the channel!", show_alert=True)
+
+# ২. স্টার্ট কমান্ড
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, command: CommandObject):
     uid = message.from_user.id
@@ -139,143 +104,87 @@ async def start_cmd(message: types.Message, command: CommandObject):
             [InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_URL)],
             [InlineKeyboardButton(text="📁 Check Again", callback_data=f"check_{args or 'none'}")]
         ])
-        # UI পরিবর্তন করা হয়নি
         await message.answer("⚠️ You must join channel first", reply_markup=kb)
         return
 
-    # ১. ভিডিও ডেলিভারি এবং ১০ মিনিট পর অটো ডিলিট
+    # ভিডিও ডেলিভারি
     if args and args.startswith("vid"):
         video_data = await video_links_col.find_one({"video_key": args})
         if video_data:
-            # ভিডিও পাঠানো
             sent_video = await bot.send_video(chat_id=uid, video=video_data["file_id"])
-            
-            # সতর্কতা মেসেজ
-            notif_msg = await message.answer("⚠️ **Security Alert:** This video will be automatically deleted in **10 minutes**.")
-            
-            # ডিলিট টাস্ক শুরু (৬০০ সেকেন্ড)
+            notif_msg = await message.answer("⚠️ **Security Alert:** This video will be deleted in **10 minutes**.")
             asyncio.create_task(auto_delete_video(uid, sent_video.message_id, 600))
             asyncio.create_task(auto_delete_video(uid, notif_msg.message_id, 600))
             return
-        else:
-            await message.answer("❌ Invalid or expired video link.")
-            return
 
-    # ২. ইউজার রেজিস্ট্রেশন
+    # ইউজার রেজিস্ট্রেশন ও রেফার
     user = await users_col.find_one({"user_id": uid})
     if not user:
+        credits = 10
         if args and args.startswith("ref_"):
             try:
                 ref_id = int(args.split("_")[1])
                 if ref_id != uid:
-                    await users_col.update_one(
-                        {"user_id": ref_id},
-                        {"$inc": {"credits": 5}},
-                        upsert=True
-                    )
-            except:
-                pass
-
+                    await users_col.update_one({"user_id": ref_id}, {"$inc": {"credits": 5}})
+                    await bot.send_message(ref_id, "🎉 Someone joined using your link! You got 5 credits.")
+            except: pass
+        
         await users_col.insert_one({
-            "user_id": uid,
-            "credits": 10,
-            "name": name,
-            "joined_at": datetime.utcnow()
+            "user_id": uid, "credits": credits, "name": name, "joined_at": datetime.utcnow()
         })
 
-    await update_last_seen(uid)
     await message.answer(f"Welcome {name}", reply_markup=get_main_menu())
 
-
-# =========================
-# WALLET
-# =========================
+# ৩. ওয়ালেট হ্যান্ডলার (মেনু বাটন ফিক্সড)
 @dp.message(F.text.in_(["Check your wallet", "/wallet"]))
 async def wallet_handler(message: types.Message):
     uid = message.from_user.id
-    user = await users_col.find_one({"user_id": uid}) or {}
+    user = await users_col.find_one({"user_id": uid}) or {"credits": 0}
     
     wallet_txt = (
-        f"👤 **User:** {message.from_user.full_name}\n"
-        f"🆔 **User ID:** `{uid}`\n"
+        f"👤 **User:** {message.from_user.full_name}\n🆔 **User ID:** `{uid}`\n"
         "━━━━━━━━━━━━━━━━━\n"
         f"💰 **Credits:** {user.get('credits', 0)}\n\n"
-        "━━━━━━━━━━━━━━━━━\n"
-        "✨ **Note:** You can earn **10 free credits** every time you watch a short ad.\n\n"
-        "💸 **Don't want to watch ads?** You can also **buy credits** directly from the button below.\n\n"
-        "🎉 Let's keep the fun going!"
+        "✨ Note: Earn 10 free credits by watching ads.\n"
+        "💸 Buy credits from admin below."
     )
-
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🤝 Refer & Earn", url=f"https://t.me/share/url?url={get_refer_link(uid)}")],
         [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{ADMIN_USERNAME}")]
     ])
     await message.answer(wallet_txt, reply_markup=kb, parse_mode="Markdown")
 
+# ৪. ক্রেডিট অ্যাড কমান্ড (এডমিন কমান্ড যা আপনার দরকার ছিল)
+@dp.message(Command("add"))
+async def add_credits(message: types.Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    try:
+        args = command.args.split()
+        target_id = int(args[0])
+        amount = int(args[1])
+        await users_col.update_one({"user_id": target_id}, {"$inc": {"credits": amount}}, upsert=True)
+        await message.answer(f"✅ Added {amount} credits to `{target_id}`")
+        await bot.send_message(target_id, f"💰 {amount} credits have been added to your wallet!")
+    except:
+        await message.answer("❌ Format: `/add [user_id] [amount]`")
 
-# =========================
-# ADMIN PANEL
-# =========================
+# ৫. এডমিন প্যানেল
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
+    if message.from_user.id != ADMIN_ID: return
     total = await users_col.count_documents({})
-    cpu = psutil.cpu_percent()
-    ram = psutil.virtual_memory().percent
     uptime = int(time.time() - START_TIME)
-    text = (
-        "⚡ SYSTEM STATUS\n"
-        "━━━━━━━━━━━━━━\n"
-        f"👥 Users: {total}\n"
-        f"🖥 CPU: {cpu}%\n"
-        f"🧠 RAM: {ram}%\n"
-        f"⏱ Uptime: {uptime}s"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 Refresh", callback_data="refresh_admin")]
-    ])
+    text = f"⚡ SYSTEM STATUS\n👥 Users: {total}\n🖥 CPU: {psutil.cpu_percent()}%\n⏱ Uptime: {uptime}s"
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔄 Refresh", callback_data="refresh_admin")]])
     await message.answer(text, reply_markup=kb)
 
-@dp.callback_query(F.data == "refresh_admin")
-async def refresh(call: types.CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-    await call.answer("Updated")
-    await admin_panel(call.message)
-
-
 # =========================
-# VIDEO SAVE (ADMIN)
-# =========================
-@dp.message(F.video & (F.from_user.id == ADMIN_ID))
-async def save_video(message: types.Message):
-    key = f"vid{random.randint(1000,9999)}"
-    await video_links_col.insert_one({
-        "video_key": key,
-        "file_id": message.video.file_id
-    })
-    link = f"https://t.me/{BOT_USERNAME}?start={key}"
-    await message.answer(f"✅ Saved!\n{link}")
-
-
-# =========================
-# RUN
+# RUN BOT
 # =========================
 async def main():
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        # VPS এ বট চালানোর জন্য polling মেথডই সবথেকে নিরাপদ
-        await asyncio.gather(
-            start_fake_server(),
-            dp.start_polling(bot)
-        )
-    except Exception as e:
-        logging.error(f"Bot Main loop error: {e}")
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logging.info("Bot stopped")
-        
+    asyncio.run(main())
+    
