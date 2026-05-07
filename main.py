@@ -344,6 +344,35 @@ async def buy_credits(message: types.Message):
         parse_mode="Markdown"
     )
 
+# =========================
+# VIDEO TO LINK GENERATOR (ADMIN ONLY)
+# =========================
+@dp.message(F.video)
+async def handle_admin_video(message: types.Message):
+    """✅ Admin ভিডিও দিলে লিঙ্ক জেনারেট হবে"""
+    if not is_admin(message.from_user.id):
+        return 
+
+    file_id = message.video.file_id
+    video_key = f"vid_{random.getrandbits(32)}"
+    
+    await video_links_col.insert_one({
+        "video_key": video_key,
+        "file_id": file_id,
+        "created_at": datetime.utcnow()
+    })
+    
+    share_link = f"https://t.me/{BOT_USERNAME}?start={video_key}"
+    
+    text = (
+        "✅ **Video Saved Successfully!**\n\n"
+        f"🔗 **Your Link:** `{share_link}`"
+    )
+    
+    await message.answer(text, parse_mode=None)
+    
+
+
 # Handle unknown commands
 @dp.message()
 async def unknown(message: types.Message):
