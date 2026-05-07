@@ -119,13 +119,24 @@ async def start_cmd(message: types.Message, command: CommandObject):
         await message.answer("⚠️ You must join our channel first to use the bot!", reply_markup=kb)
         return
 
-    # Video delivery
+        # Video delivery ও সাইলেন্ট ক্রেডিট ডিডাকশন (১ ক্রেডিট)
     if args and args.startswith("vid"):
+        user = await users_col.find_one({"user_id": uid})
+        
+        # চেক: ইউজারের অন্তত ১ ক্রেডিট আছে কি না
+        if not user or user.get("credits", 0) < 1:
+            await message.answer("❌ আপনার পর্যাপ্ত ক্রেডিট নেই! ভিডিও দেখতে ক্রেডিট অর্জন করুন বা রেফার করুন।")
+            return
+
         video_data = await video_links_col.find_one({"video_key": args})
         if video_data:
             try:
+                # ১ ক্রেডিট কেটে নেওয়া হচ্ছে (সাইলেন্টলি)
+                await users_col.update_one({"user_id": uid}, {"$inc": {"credits": -1}})
+                
                 sent_video = await bot.send_video(chat_id=uid, video=video_data["file_id"])
                 notif_msg = await message.answer("⚠️ **Security Alert:** This video will be deleted in **10 minutes**.")
+                
                 asyncio.create_task(auto_delete_video(uid, sent_video.message_id, 600))
                 asyncio.create_task(auto_delete_video(uid, notif_msg.message_id, 600))
                 return
@@ -133,6 +144,7 @@ async def start_cmd(message: types.Message, command: CommandObject):
                 await message.answer("❌ Video sending failed!")
                 logging.error(f"Video send error: {e}")
                 return
+                
 
     # User registration & Referral system ✅ FIXED
     user = await users_col.find_one({"user_id": uid})
