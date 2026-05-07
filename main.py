@@ -14,9 +14,9 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton
 )
+from aiogram.exceptions import TelegramBadRequest
 
 from motor.motor_asyncio import AsyncIOMotorClient
-from aiohttp import web
 
 # =========================
 # CONFIG
@@ -24,7 +24,7 @@ from aiohttp import web
 API_TOKEN = "8565287860:AAHqxvFGov9qwtFcmI78qVmB_KFf-24ZJ9o"
 MONGO_URL = "mongodb+srv://itsmeratul3_db_user:Ratul1234@mybotdatabase.5m5engl.mongodb.net/?retryWrites=true&w=majority"
 
-ADMIN_ID = 6793604200
+ADMIN_ID = 6793604200  # ✅ এটি int হিসেবে সেট করা হয়েছে
 CHANNEL_ID = -1003960638119
 CHANNEL_URL = "https://t.me/+iIe1XRdmMr5kNzFl"
 ADMIN_USERNAME = "artist_x0"
@@ -48,18 +48,21 @@ video_links_col = db["video_links"]
 # HELPERS
 # =========================
 async def is_subscribed(user_id):
+    """✅ Channel subscription check - improved error handling"""
     try:
-        m = await bot.get_chat_member(CHANNEL_ID, user_id)
-        return m.status in ["member", "administrator", "creator"]
-    except Exception:
+        member = await bot.get_chat_member(CHANNEL_ID, user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except Exception as e:
+        logging.error(f"Subscription check error for {user_id}: {e}")
         return False
 
 async def auto_delete_video(chat_id, msg_id, seconds=600):
+    """✅ Auto delete video after specified time"""
     await asyncio.sleep(seconds)
     try:
         await bot.delete_message(chat_id, msg_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.error(f"Auto delete failed: {e}")
 
 def get_main_menu():
     return ReplyKeyboardMarkup(
@@ -67,124 +70,264 @@ def get_main_menu():
             [KeyboardButton(text="Start the bot"), KeyboardButton(text="Check your wallet")],
             [KeyboardButton(text="Buy credits"), KeyboardButton(text="Get channels")]
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
+        one_time_keyboard=False
     )
 
 def get_refer_link(uid):
     return f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
 
 # =========================
+# ADMIN CHECKER
+# =========================
+def is_admin(user_id: int) -> bool:
+    """✅ Admin checker - সব জায়গায় এটাই ব্যবহার করুন"""
+    return user_id == ADMIN_ID
+
+# =========================
 # HANDLERS
 # =========================
 
-# ১. 'Check Again' বাটন হ্যান্ডলার (এটি আপনার আগের কোডে ছিল না)
 @dp.callback_query(F.data.startswith("check_"))
 async def check_subscription_callback(call: types.CallbackQuery):
+    """✅ Check Again button handler"""
     uid = call.from_user.id
-    arg = call.data.replace("check_", "")
-    
-    if await is_subscribed(uid):
-        await call.answer("✅ Thank you for joining!")
-        # সাবস্ক্রাইব করা থাকলে স্টার্ট মেসেজ পাঠিয়ে দিচ্ছি
-        await call.message.delete()
-        # এখানে স্টার্ট কমান্ডের মতো লজিক কাজ করবে
-        await bot.send_message(uid, f"Welcome back, {call.from_user.full_name}!", reply_markup=get_main_menu())
-    else:
-        await call.answer("⚠️ You still haven't joined the channel!", show_alert=True)
+    try:
+        if await is_subscribed(uid):
+            await call.answer("✅ Thank you for joining!", show_alert=False)
+            await call.message.delete()
+            await bot.send_message(uid, f"Welcome back, {call.from_user.full_name}!", reply_markup=get_main_menu())
+        else:
+            await call.answer("⚠️ You still haven't joined the channel!", show_alert=True)
+    except Exception as e:
+        await call.answer("❌ Error occurred!", show_alert=True)
+        logging.error(f"Check callback error: {e}")
 
-# ২. স্টার্ট কমান্ড
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message, command: CommandObject):
+    """✅ Start command - Fixed referral system"""
     uid = message.from_user.id
-    args = command.args
+    args = command.args or ""
     name = message.from_user.full_name
 
+    # Subscription check
     if not await is_subscribed(uid):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_URL)],
             [InlineKeyboardButton(text="📁 Check Again", callback_data=f"check_{args or 'none'}")]
         ])
-        await message.answer("⚠️ You must join channel first", reply_markup=kb)
+        await message.answer("⚠️ You must join our channel first to use the bot!", reply_markup=kb)
         return
 
-    # ভিডিও ডেলিভারি
+    # Video delivery
     if args and args.startswith("vid"):
         video_data = await video_links_col.find_one({"video_key": args})
         if video_data:
-            sent_video = await bot.send_video(chat_id=uid, video=video_data["file_id"])
-            notif_msg = await message.answer("⚠️ **Security Alert:** This video will be deleted in **10 minutes**.")
-            asyncio.create_task(auto_delete_video(uid, sent_video.message_id, 600))
-            asyncio.create_task(auto_delete_video(uid, notif_msg.message_id, 600))
-            return
+            try:
+                sent_video = await bot.send_video(chat_id=uid, video=video_data["file_id"])
+                notif_msg = await message.answer("⚠️ **Security Alert:** This video will be deleted in **10 minutes**.")
+                asyncio.create_task(auto_delete_video(uid, sent_video.message_id, 600))
+                asyncio.create_task(auto_delete_video(uid, notif_msg.message_id, 600))
+                return
+            except Exception as e:
+                await message.answer("❌ Video sending failed!")
+                logging.error(f"Video send error: {e}")
+                return
 
-    # ইউজার রেজিস্ট্রেশন ও রেফার
+    # User registration & Referral system ✅ FIXED
     user = await users_col.find_one({"user_id": uid})
     if not user:
-        credits = 10
+        credits = 10  # Default credits
+        
+        # Referral logic ✅ FIXED - এখানে সমস্যা ছিল
         if args and args.startswith("ref_"):
             try:
-                ref_id = int(args.split("_")[1])
-                if ref_id != uid:
-                    await users_col.update_one({"user_id": ref_id}, {"$inc": {"credits": 5}})
-                    await bot.send_message(ref_id, "🎉 Someone joined using your link! You got 5 credits.")
-            except: pass
+                ref_id_str = args.split("_")[1]
+                ref_id = int(ref_id_str)
+                if ref_id != uid and ref_id > 0:
+                    # Check if referrer exists
+                    referrer = await users_col.find_one({"user_id": ref_id})
+                    if referrer:
+                        await users_col.update_one(
+                            {"user_id": ref_id}, 
+                            {"$inc": {"credits": 5}}, 
+                            upsert=False
+                        )
+                        try:
+                            await bot.send_message(
+                                ref_id, 
+                                "🎉 Someone joined using your referral link! You got **5 credits**.",
+                                parse_mode="Markdown"
+                            )
+                        except:
+                            pass  # Referrer blocked bot or deleted account
+                        credits += 2  # Bonus for joining via referral
+            except (ValueError, IndexError):
+                logging.error(f"Invalid referral format: {args}")
         
+        # Insert new user ✅ FIXED
         await users_col.insert_one({
-            "user_id": uid, "credits": credits, "name": name, "joined_at": datetime.utcnow()
+            "user_id": uid, 
+            "credits": credits, 
+            "name": name, 
+            "joined_at": datetime.utcnow()
         })
+        logging.info(f"New user registered: {uid}, credits: {credits}")
 
-    await message.answer(f"Welcome {name}", reply_markup=get_main_menu())
+    # Send welcome message
+    try:
+        await message.answer(
+            f"🎉 Welcome {name}!\n\n💎 **Your starting credits:** 10\n\nChoose an option below:",
+            reply_markup=get_main_menu(),
+            parse_mode="Markdown"
+        )
+    except TelegramBadRequest:
+        await message.answer(f"Welcome {name}!", reply_markup=get_main_menu())
 
-# ৩. ওয়ালেট হ্যান্ডলার (মেনু বাটন ফিক্সড)
 @dp.message(F.text.in_(["Check your wallet", "/wallet"]))
 async def wallet_handler(message: types.Message):
+    """✅ Wallet handler"""
     uid = message.from_user.id
     user = await users_col.find_one({"user_id": uid}) or {"credits": 0}
     
     wallet_txt = (
-        f"👤 **User:** {message.from_user.full_name}\n🆔 **User ID:** `{uid}`\n"
+        f"👤 **User:** {message.from_user.full_name}\n"
+        f"🆔 **User ID:** `{uid}`\n"
         "━━━━━━━━━━━━━━━━━\n"
         f"💰 **Credits:** {user.get('credits', 0)}\n\n"
-        "✨ Note: Earn 10 free credits by watching ads.\n"
-        "💸 Buy credits from admin below."
+        "✨ **Earn more credits:**\n"
+        "• Watch ads (10 credits)\n"
+        "• Refer friends (5 credits each)\n"
+        "• Buy from admin\n\n"
+        f"👨‍💼 **Admin:** @{ADMIN_USERNAME}"
     )
+    
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🤝 Refer & Earn", url=f"https://t.me/share/url?url={get_refer_link(uid)}")],
-        [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{ADMIN_USERNAME}")]
+        [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{ADMIN_USERNAME}")],
+        [InlineKeyboardButton(text="📢 Our Channel", url=CHANNEL_URL)]
     ])
+    
     await message.answer(wallet_txt, reply_markup=kb, parse_mode="Markdown")
 
-# ৪. ক্রেডিট অ্যাড কমান্ড (এডমিন কমান্ড যা আপনার দরকার ছিল)
+# ✅ ADMIN COMMANDS - FIXED
 @dp.message(Command("add"))
 async def add_credits(message: types.Message, command: CommandObject):
-    if message.from_user.id != ADMIN_ID: return
+    """✅ Add credits - Admin only"""
+    if not is_admin(message.from_user.id):
+        return  # Silent ignore for non-admins
+    
     try:
         args = command.args.split()
+        if len(args) < 2:
+            await message.answer("❌ **Format:** `/add [user_id] [amount]`", parse_mode="Markdown")
+            return
+            
         target_id = int(args[0])
         amount = int(args[1])
-        await users_col.update_one({"user_id": target_id}, {"$inc": {"credits": amount}}, upsert=True)
-        await message.answer(f"✅ Added {amount} credits to `{target_id}`")
-        await bot.send_message(target_id, f"💰 {amount} credits have been added to your wallet!")
-    except:
-        await message.answer("❌ Format: `/add [user_id] [amount]`")
+        
+        if amount <= 0:
+            await message.answer("❌ Amount must be positive!")
+            return
+            
+        result = await users_col.update_one(
+            {"user_id": target_id}, 
+            {"$inc": {"credits": amount}}, 
+            upsert=True
+        )
+        
+        status = "✅" if result.modified_count > 0 else "🔄"
+        await message.answer(f"{status} Added **{amount}** credits to user `{target_id}`", parse_mode="Markdown")
+        
+        # Notify user
+        try:
+            await bot.send_message(
+                target_id, 
+                f"💰 **Credits Added!**\n\n+{amount} credits have been added to your wallet!\n\n💎 Check your balance:",
+                parse_mode="Markdown"
+            )
+        except:
+            await message.answer(f"⚠️ User `{target_id}` may have blocked the bot", parse_mode="Markdown")
+            
+    except ValueError:
+        await message.answer("❌ **Invalid format!** Use: `/add 123456789 50`", parse_mode="Markdown")
+    except Exception as e:
+        await message.answer("❌ **Error occurred!**")
+        logging.error(f"Add credits error: {e}")
 
-# ৫. এডমিন প্যানেল
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
-    if message.from_user.id != ADMIN_ID: return
-    total = await users_col.count_documents({})
-    uptime = int(time.time() - START_TIME)
-    text = f"⚡ SYSTEM STATUS\n👥 Users: {total}\n🖥 CPU: {psutil.cpu_percent()}%\n⏱ Uptime: {uptime}s"
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔄 Refresh", callback_data="refresh_admin")]])
-    await message.answer(text, reply_markup=kb)
+    """✅ Admin panel - FIXED"""
+    if not is_admin(message.from_user.id):
+        return  # Silent ignore
+    
+    try:
+        total_users = await users_col.count_documents({})
+        uptime = int(time.time() - START_TIME)
+        cpu = psutil.cpu_percent(interval=1)
+        
+        text = (
+            f"⚡ **BOT STATUS**\n\n"
+            f"👥 **Total Users:** {total_users}\n"
+            f"🖥 **CPU Usage:** {cpu}%\n"
+            f"⏱ **Uptime:** {uptime//3600}h {(uptime%3600)//60}m\n"
+            f"🌐 **Channel:** {CHANNEL_URL}\n\n"
+            f"**Commands:**\n"
+            f"`/add [id] [amount]` - Add credits\n"
+            f"`/admin` - Admin panel"
+        )
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Refresh", callback_data="refresh_admin")],
+            [InlineKeyboardButton(text="📊 Users List", callback_data="users_list")]
+        ])
+        
+        await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        
+    except Exception as e:
+        await message.answer("❌ Error loading admin panel!")
+        logging.error(f"Admin panel error: {e}")
+
+@dp.message(F.text == "Buy credits")
+async def buy_credits(message: types.Message):
+    """✅ Buy credits handler"""
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💎 Contact Admin", url=f"https://t.me/{ADMIN_USERNAME}")],
+        [InlineKeyboardButton(text="💰 Check Wallet", callback_data="check_wallet")]
+    ])
+    await message.answer(
+        f"💎 **Buy Credits**\n\n"
+        f"📞 Contact admin: @{ADMIN_USERNAME}\n\n"
+        f"💰 **Rates:**\n"
+        f"• 100 credits = $1\n"
+        f"• 500 credits = $4\n"
+        f"• 1000 credits = $7",
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
+
+# Handle unknown commands
+@dp.message()
+async def unknown(message: types.Message):
+    """✅ Unknown message handler"""
+    await message.answer(
+        "❓ **Unknown command!**\n\n"
+        "Use the buttons below:",
+        reply_markup=get_main_menu(),
+        parse_mode="Markdown"
+    )
 
 # =========================
 # RUN BOT
 # =========================
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    """✅ Main function with proper startup"""
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logging.info("🚀 Bot started successfully!")
+        await dp.start_polling(bot)
+    except Exception as e:
+        logging.error(f"Bot startup error: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
