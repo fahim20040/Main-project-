@@ -80,7 +80,7 @@ def get_main_menu():
 
 def get_refer_link(uid):
     return f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
-Async def create_gplinks_link(user_id):
+async def create_gplinks_link(user_id):
     unique_token = str(uuid.uuid4())[:13] 
     callback_url = f"https://t.me/Genz2027bot?start=verify_{unique_token}"
     api_url = f"https://gplinks.in/api?api={GPLINKS_API_KEY}&url={callback_url}"
