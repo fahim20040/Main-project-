@@ -271,13 +271,11 @@ async def send_wallet_info(message: types.Message):
         if ad_url:
             await users_col.update_one({"user_id": uid}, {"$set": {"pending_token": token}})       
     
-    # বাটন সেটআপ
+    # বাটন সেটআপ (লাইন ২৭৪)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🤝 Refer & Earn", url=share_text)],
-        [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{admin_username}")]
-    ])
-     kb.inline_keyboard.append([InlineKeyboardButton(text="📺 Watch 1 Ad - Get 10 free credits", url=ad_url)])
-
+    [InlineKeyboardButton(text="🤝 Refer & Earn", url=share_text)],
+    [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{admin_username}")]])
+    kb.inline_keyboard.append([InlineKeyboardButton(text="📺 Watch 1 Ad - Get 10 free credits", url=ad_url)])
     # আপনার দেওয়া হুবহু ফরম্যাট
     text = (
         f"👤 **User:** {message.chat.full_name if message.chat.full_name else 'User'}\n"
