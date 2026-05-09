@@ -29,8 +29,12 @@ CHANNEL_ID = -1003960638119
 CHANNEL_URL = "https://t.me/+iIe1XRdmMr5kNzFl"
 ADMIN_USERNAME = "artist_x0"
 BOT_USERNAME = "Genz2027bot"
-
 START_TIME = time.time()
+# GPLINKS CONFIG
+GPLINKS_API_KEY = "f3e0ae2243dfd8fa6058f35c0a9f00bbb396f7f8"
+import uuid
+import requests
+from datetime import timedelta  
 
 # =========================
 # INIT
@@ -76,6 +80,16 @@ def get_main_menu():
 
 def get_refer_link(uid):
     return f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
+Async def create_gplinks_link(user_id):
+    unique_token = str(uuid.uuid4())[:13] 
+    callback_url = f"https://t.me/Genz2027bot?start=verify_{unique_token}"
+    api_url = f"https://gplinks.in/api?api={GPLINKS_API_KEY}&url={callback_url}"
+    try:
+        res = requests.get(api_url).json()
+        if res["status"] == "success":
+            return res["shortenedUrl"], unique_token
+    except:
+        return None, None
 
 # =========================
 # ADMIN CHECKER
@@ -122,6 +136,30 @@ async def start_cmd(message: types.Message, command: CommandObject):
         # Video delivery ও সাইলেন্ট ক্রেডিট ডিডাকশন (১ ক্রেডিট)
     if args and args.startswith("vid"):
         user = await users_col.find_one({"user_id": uid})
+        
+    # অ্যাড ভেরিফিকেশন চেক
+    if args and args.startswith("verify_"):
+        token = args.split("_")[1]
+        user_data = await users_col.find_one({"user_id": uid})
+        
+        if user_data and user_data.get("pending_token") == token:
+            await users_col.update_one(
+                {"user_id": uid},
+                {
+                    "$inc": {"credits": 10}, 
+                    "$set": {"last_ad_claim": datetime.utcnow()}, 
+                    "$unset": {"pending_token": ""}
+                }
+            )
+            
+            return await message.answer(
+                "🎉 অভিনন্দন! আপনি সফলভাবে ১০ ক্রেডিট পেয়েছেন।\n\n"
+                "নতুন করে ক্রেডিট পেতে ২৪ ঘণ্টা অপেক্ষা করুন, "
+                "অথবা আপনি চাইলে ক্রেডিট ক্রয় করতে পারেন।"
+            )
+        else:
+            return await message.answer("❌ এই লিঙ্কটি ইতিমধ্যে ব্যবহৃত হয়েছে বা অবৈধ।")
+            
         
         # চেক: ইউজারের অন্তত ১ ক্রেডিট আছে কি না
         if not user or user.get("credits", 0) < 1:
@@ -223,12 +261,22 @@ async def send_wallet_info(message: types.Message):
     # রেফারেল ও শেয়ার লিঙ্ক
     refer_link = f"https://t.me/{bot_username}?start=ref_{uid}"
     share_text = f"https://t.me/share/url?url={refer_link}&text=বটটি ব্যবহার করে ফ্রি ক্রেডিট পান এবং প্রিমিয়াম ভিডিও দেখুন!"
+# ২৪ ঘণ্টা চেক লজিক
+        # ২৪ ঘণ্টা চেক লজিক
+    last_claim = user.get("last_ad_claim")
+    is_eligible = not last_claim or datetime.utcnow() > last_claim + timedelta(hours=24)
 
+    if is_eligible:
+        ad_url, token = await create_gplinks_link(uid)
+        if ad_url:
+            await users_col.update_one({"user_id": uid}, {"$set": {"pending_token": token}})       
+    
     # বাটন সেটআপ
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🤝 Refer & Earn", url=share_text)],
         [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{admin_username}")]
     ])
+     kb.inline_keyboard.append([InlineKeyboardButton(text="📺 Watch 1 Ad - Get 10 free credits", url=ad_url)])
 
     # আপনার দেওয়া হুবহু ফরম্যাট
     text = (
