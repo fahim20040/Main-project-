@@ -4,7 +4,6 @@ import os
 import time
 import psutil
 import random
-from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
@@ -32,9 +31,7 @@ BOT_USERNAME = "Genz2027bot"
 START_TIME = time.time()
 # GPLINKS CONFIG
 GPLINKS_API_KEY = "f3e0ae2243dfd8fa6058f35c0a9f00bbb396f7f8"
-import uuid
-import requests
-from datetime import timedelta  
+from datetime import datetime, timedelta
 
 # =========================
 # INIT
