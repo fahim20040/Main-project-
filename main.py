@@ -22,7 +22,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 # =========================
 # CONFIG
 # =========================
-API_TOKEN = "8565287860:AAHqxvFGov9qwtFcmI78qVmB_KFf-24ZJ9o"
+API_TOKEN = "8565287860:AAEuYopIrpt9UtZLXMLxC_ceo5z-fOTsT8M"
 MONGO_URL = "mongodb+srv://itsmeratul3_db_user:Ratul1234@mybotdatabase.5m5engl.mongodb.net/?retryWrites=true&w=majority"
 
 ADMIN_ID = 6793604200 
