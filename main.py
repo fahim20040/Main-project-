@@ -4,6 +4,7 @@ import os
 import time
 import psutil
 import random
+import uuid
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
