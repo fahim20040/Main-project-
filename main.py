@@ -5,7 +5,7 @@ import time
 import psutil
 import random
 import uuid  
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command, CommandObject
@@ -67,7 +67,7 @@ def get_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Start the bot"), KeyboardButton(text="Check your wallet")],
-            [KeyboardButton(text="Buy credits"), KeyboardButton(text="Get channels")]
+            [KeyboardButton(text="🎁 Claim Free Credit"), KeyboardButton(text="Get channels")] # Update: Buy Credits replaced with Claim
         ],
         resize_keyboard=True,
         one_time_keyboard=False
@@ -139,6 +139,35 @@ async def start_cmd(message: types.Message, command: CommandObject):
 
     await message.answer(f"🎉 Welcome {name}!\n\n💎 **Your starting credits:** 10", reply_markup=get_main_menu())
 
+@dp.message(F.text == "🎁 Claim Free Credit")
+async def claim_credit_handler(message: types.Message):
+    uid = message.from_user.id
+    user = await users_col.find_one({"user_id": uid})
+    
+    if not user:
+        return await message.answer("❌ আগে বটটি স্টার্ট করুন!")
+
+    last_claim = user.get("last_claim_time")
+    current_time = datetime.utcnow()
+
+    if last_claim:
+        wait_until = last_claim + timedelta(hours=18)
+        if current_time < wait_until:
+            remaining = wait_until - current_time
+            hours, remainder = divmod(int(remaining.total_seconds()), 3600)
+            minutes, _ = divmod(remainder, 60)
+            return await message.answer(f"⏳ আপনি ইতিমধ্যে ক্রেডিট নিয়েছেন!\n\nআবার **{hours} ঘণ্টা {minutes} মিনিট** পর চেষ্টা করুন।")
+
+    # আপডেট ক্রেডিট এবং সময়
+    await users_col.update_one(
+        {"user_id": uid},
+        {
+            "$inc": {"credits": 10},
+            "$set": {"last_claim_time": current_time}
+        }
+    )
+    await message.answer("🎉 অভিনন্দন! আপনি সফলভাবে **১০ ক্রেডিট** ক্লেইম করেছেন।\n\nপরবর্তী ক্লেইম ১৮ ঘণ্টা পর করতে পারবেন।")
+
 @dp.message(F.text.in_(["Check your wallet", "/wallet"]))
 async def wallet_handler(message: types.Message):
     uid = message.from_user.id
@@ -148,6 +177,7 @@ async def wallet_handler(message: types.Message):
     refer_link = f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
     share_text = f"https://t.me/share/url?url={refer_link}&text=বটটি ব্যবহার করে ফ্রি ক্রেডিট পান!"
 
+    # Inline buttons remain unchanged as requested
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🤝 Refer & Earn", url=share_text)],
         [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{ADMIN_USERNAME}")]
@@ -201,4 +231,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
