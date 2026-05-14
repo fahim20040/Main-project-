@@ -27,6 +27,7 @@ MONGO_URL = "mongodb+srv://itsmeratul3_db_user:Ratul1234@mybotdatabase.5m5engl.m
 
 ADMIN_ID = 6793604200 
 CHANNEL_ID = -1003960638119
+LOG_CHANNEL_ID = -1003943039065  # <--- আপনার দেওয়া গ্রুপ আইডি এখানে বসানো হয়েছে
 CHANNEL_URL = "https://t.me/+iIe1XRdmMr5kNzFl"
 ADMIN_USERNAME = "artist_x0"
 BOT_USERNAME = "Genz2027bot"
@@ -48,6 +49,13 @@ video_links_col = db["video_links"]
 # =========================
 # HELPERS
 # =========================
+async def send_log(text):
+    """লগ চ্যানেলে ট্রানজেকশন হিস্ট্রি পাঠানোর ফাংশন"""
+    try:
+        await bot.send_message(LOG_CHANNEL_ID, text, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Log error: {e}")
+
 async def is_subscribed(user_id):
     try:
         member = await bot.get_chat_member(CHANNEL_ID, user_id)
@@ -88,10 +96,10 @@ async def check_subscription_callback(call: types.CallbackQuery):
     
     try:
         if await is_subscribed(uid):
-            # রেফারেল এবং রেজিস্ট্রেশন লজিক ইন্টিগ্রেশন
             user_data = await users_col.find_one({"user_id": uid})
             if not user_data:
                 credits = 10
+                log_msg = f"🆕 **New User Registered**\n👤 **Name:** {name}\n🆔 **ID:** `{uid}`"
                 if args.startswith("ref_"):
                     try:
                         ref_id = int(args.split("_")[1])
@@ -100,8 +108,10 @@ async def check_subscription_callback(call: types.CallbackQuery):
                             try: await bot.send_message(ref_id, f"🎉 {name} আপনার লিঙ্কে জয়েন করেছে! আপনি ৫ ক্রেডিট পেয়েছেন।")
                             except: pass
                             credits += 2
+                            log_msg += f"\n🤝 **Referrer ID:** `{ref_id}` (Got 5 credits)"
                     except: pass
                 await users_col.insert_one({"user_id": uid, "credits": credits, "name": name, "joined_at": datetime.utcnow()})
+                await send_log(log_msg)
             
             await call.answer("✅ Thank you for joining!", show_alert=False)
             await call.message.delete()
@@ -117,15 +127,14 @@ async def start_cmd(message: types.Message, command: CommandObject):
     args = command.args or ""
     name = message.from_user.full_name
 
-    # ১. ব্যান চেক
     user_data = await users_col.find_one({"user_id": uid})
     if user_data and user_data.get("is_banned"):
         await message.answer("🚫 আপনি এই বটটি ব্যবহার করার জন্য নিষিদ্ধ (Banned)।")
         return
 
-    # ২. রেজিস্ট্রেশন এবং রেফারেল
     if not user_data and await is_subscribed(uid):
         credits = 10
+        log_msg = f"🆕 **New User Registered**\n👤 **Name:** {name}\n🆔 **ID:** `{uid}`"
         if args.startswith("ref_"):
             try:
                 ref_id = int(args.split("_")[1])
@@ -134,11 +143,12 @@ async def start_cmd(message: types.Message, command: CommandObject):
                     try: await bot.send_message(ref_id, f"🎉 {name} আপনার লিঙ্কে জয়েন করেছে! আপনি ৫ ক্রেডিট পেয়েছেন।")
                     except: pass
                     credits += 2
+                    log_msg += f"\n🤝 **Referrer ID:** `{ref_id}` (Got 5 credits)"
             except: pass
         await users_col.insert_one({"user_id": uid, "credits": credits, "name": name, "joined_at": datetime.utcnow()})
+        await send_log(log_msg)
         user_data = await users_col.find_one({"user_id": uid})
 
-    # ৩. সাবস্ক্রিপশন চেক
     if not await is_subscribed(uid):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_URL)],
@@ -147,7 +157,6 @@ async def start_cmd(message: types.Message, command: CommandObject):
         await message.answer("⚠️ You must join our channel first to use the bot!", reply_markup=kb)
         return
 
-    # ৪. ভিডিও লিংক হ্যান্ডলিং
     if args.startswith("vid"):
         if not user_data or user_data.get("credits", 0) < 1:
             await message.answer("❌ আপনার পর্যাপ্ত ক্রেডিট নেই! ভিডিও দেখতে ক্রেডিট অর্জন করুন বা রেফার করুন।")
@@ -158,6 +167,10 @@ async def start_cmd(message: types.Message, command: CommandObject):
             await users_col.update_one({"user_id": uid}, {"$inc": {"credits": -1}})
             sent_video = await bot.send_video(chat_id=uid, video=video_data["file_id"])
             notif_msg = await message.answer("⚠️ **Security Alert:** This video will be deleted in **10 minutes**.")
+            
+            # ট্রানজেকশন লগ পাঠানো
+            await send_log(f"📺 **Video Viewed**\n👤 **Name:** {name}\n🆔 **ID:** `{uid}`\n🔑 **Key:** `{args}`\n💰 **Status:** 1 Credit deducted")
+            
             asyncio.create_task(auto_delete_video(uid, sent_video.message_id, 600))
             asyncio.create_task(auto_delete_video(uid, notif_msg.message_id, 600))
             return
@@ -169,7 +182,6 @@ async def claim_credit_handler(message: types.Message):
     uid = message.from_user.id
     user = await users_col.find_one({"user_id": uid})
     
-    # অটো-রেজিস্ট্রেশন (যাতে 'আগে বট স্টার্ট করুন' মেসেজ না আসে)
     if not user:
         await users_col.insert_one({"user_id": uid, "credits": 10, "name": message.from_user.full_name, "joined_at": datetime.utcnow()})
         user = await users_col.find_one({"user_id": uid})
@@ -188,33 +200,24 @@ async def claim_credit_handler(message: types.Message):
             minutes, _ = divmod(remainder, 60)
             return await message.answer(f"⏳ আপনি ইতিমধ্যে ক্রেডিট নিয়েছেন!\n\nআবার **{hours} ঘণ্টা {minutes} মিনিট** পর চেষ্টা করুন।")
 
-    await users_col.update_one(
-        {"user_id": uid},
-        {
-            "$inc": {"credits": 10},
-            "$set": {"last_claim_time": current_time}
-        }
-    )
+    await users_col.update_one({"user_id": uid}, {"$inc": {"credits": 10}, "$set": {"last_claim_time": current_time}})
     await message.answer("🎉 অভিনন্দন! আপনি সফলভাবে **১০ ক্রেডিট** ক্লেইম করেছেন।\n\nপরবর্তী ক্লেইম ১৮ ঘণ্টা পর করতে পারবেন।")
+    
+    # ক্লেইম লগ পাঠানো
+    await send_log(f"🎁 **Credit Claimed**\n👤 **User:** {message.from_user.full_name}\n🆔 **ID:** `{uid}`\n💰 **Amount:** 10 Credits")
 
 @dp.message(F.text.in_(["Check your wallet", "/wallet"]))
 async def wallet_handler(message: types.Message):
     uid = message.from_user.id
     user = await users_col.find_one({"user_id": uid})
-    
-    if user and user.get("is_banned"):
-        return await message.answer("🚫 আপনি নিষিদ্ধ।")
-
+    if user and user.get("is_banned"): return await message.answer("🚫 আপনি নিষিদ্ধ।")
     current_credits = user.get("credits", 0) if user else 0
-    
     refer_link = f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
     share_text = f"https://t.me/share/url?url={refer_link}&text=বটটি ব্যবহার করে ফ্রি ক্রেডিট পান!"
-
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🤝 Refer & Earn", url=share_text)],
         [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{ADMIN_USERNAME}")]
     ])
-
     text = (
         f"👤 **User:** {message.from_user.full_name}\n"
         f"🆔 **User ID:** `{uid}`\n"
@@ -227,7 +230,6 @@ async def wallet_handler(message: types.Message):
     )
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
-# --- অ্যাডমিন কমান্ড (Ban/Unban/Add) ---
 @dp.message(Command("ban"))
 async def ban_user(message: types.Message, command: CommandObject):
     if not is_admin(message.from_user.id): return
@@ -235,8 +237,8 @@ async def ban_user(message: types.Message, command: CommandObject):
         target_id = int(command.args)
         await users_col.update_one({"user_id": target_id}, {"$set": {"is_banned": True}}, upsert=True)
         await message.answer(f"✅ User `{target_id}` has been banned.")
-    except:
-        await message.answer("❌ Format: `/ban [user_id]`")
+        await send_log(f"🚫 **User Banned**\n🆔 **Target ID:** `{target_id}`\n👤 **By Admin:** `{message.from_user.id}`")
+    except: await message.answer("❌ Format: `/ban [user_id]`")
 
 @dp.message(Command("unban"))
 async def unban_user(message: types.Message, command: CommandObject):
@@ -245,8 +247,8 @@ async def unban_user(message: types.Message, command: CommandObject):
         target_id = int(command.args)
         await users_col.update_one({"user_id": target_id}, {"$set": {"is_banned": False}})
         await message.answer(f"✅ User `{target_id}` has been unbanned.")
-    except:
-        await message.answer("❌ Format: `/unban [user_id]`")
+        await send_log(f"🔓 **User Unbanned**\n🆔 **Target ID:** `{target_id}`\n👤 **By Admin:** `{message.from_user.id}`")
+    except: await message.answer("❌ Format: `/unban [user_id]`")
 
 @dp.message(Command("add"))
 async def add_credits(message: types.Message, command: CommandObject):
@@ -256,8 +258,8 @@ async def add_credits(message: types.Message, command: CommandObject):
         target_id, amount = int(args[0]), int(args[1])
         await users_col.update_one({"user_id": target_id}, {"$inc": {"credits": amount}}, upsert=True)
         await message.answer(f"✅ Added {amount} credits to `{target_id}`")
-    except:
-        await message.answer("❌ Format: `/add [user_id] [amount]`")
+        await send_log(f"💰 **Manual Credit Added**\n🆔 **To ID:** `{target_id}`\n💵 **Amount:** {amount}\n👤 **By Admin:** `{message.from_user.id}`")
+    except: await message.answer("❌ Format: `/add [user_id] [amount]`")
 
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
@@ -287,4 +289,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-        
+    
