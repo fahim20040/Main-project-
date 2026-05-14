@@ -67,7 +67,7 @@ def get_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Start the bot"), KeyboardButton(text="Check your wallet")],
-            [KeyboardButton(text="🎁 Claim Free Credit"), KeyboardButton(text="Get channels")] # Update: Buy Credits replaced with Claim
+            [KeyboardButton(text="🎁 Claim Free Credit"), KeyboardButton(text="Get channels")]
         ],
         resize_keyboard=True,
         one_time_keyboard=False
@@ -83,8 +83,26 @@ def is_admin(user_id: int) -> bool:
 @dp.callback_query(F.data.startswith("check_"))
 async def check_subscription_callback(call: types.CallbackQuery):
     uid = call.from_user.id
+    name = call.from_user.full_name
+    args = call.data.replace("check_", "")
+    
     try:
         if await is_subscribed(uid):
+            # রেফারেল এবং রেজিস্ট্রেশন লজিক ইন্টিগ্রেশন
+            user_data = await users_col.find_one({"user_id": uid})
+            if not user_data:
+                credits = 10
+                if args.startswith("ref_"):
+                    try:
+                        ref_id = int(args.split("_")[1])
+                        if ref_id != uid:
+                            await users_col.update_one({"user_id": ref_id}, {"$inc": {"credits": 5}})
+                            try: await bot.send_message(ref_id, f"🎉 {name} আপনার লিঙ্কে জয়েন করেছে! আপনি ৫ ক্রেডিট পেয়েছেন।")
+                            except: pass
+                            credits += 2
+                    except: pass
+                await users_col.insert_one({"user_id": uid, "credits": credits, "name": name, "joined_at": datetime.utcnow()})
+            
             await call.answer("✅ Thank you for joining!", show_alert=False)
             await call.message.delete()
             await bot.send_message(uid, f"Welcome back, {call.from_user.full_name}!", reply_markup=get_main_menu())
@@ -99,6 +117,28 @@ async def start_cmd(message: types.Message, command: CommandObject):
     args = command.args or ""
     name = message.from_user.full_name
 
+    # ১. ব্যান চেক
+    user_data = await users_col.find_one({"user_id": uid})
+    if user_data and user_data.get("is_banned"):
+        await message.answer("🚫 আপনি এই বটটি ব্যবহার করার জন্য নিষিদ্ধ (Banned)।")
+        return
+
+    # ২. রেজিস্ট্রেশন এবং রেফারেল
+    if not user_data and await is_subscribed(uid):
+        credits = 10
+        if args.startswith("ref_"):
+            try:
+                ref_id = int(args.split("_")[1])
+                if ref_id != uid:
+                    await users_col.update_one({"user_id": ref_id}, {"$inc": {"credits": 5}})
+                    try: await bot.send_message(ref_id, f"🎉 {name} আপনার লিঙ্কে জয়েন করেছে! আপনি ৫ ক্রেডিট পেয়েছেন।")
+                    except: pass
+                    credits += 2
+            except: pass
+        await users_col.insert_one({"user_id": uid, "credits": credits, "name": name, "joined_at": datetime.utcnow()})
+        user_data = await users_col.find_one({"user_id": uid})
+
+    # ৩. সাবস্ক্রিপশন চেক
     if not await is_subscribed(uid):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_URL)],
@@ -107,9 +147,9 @@ async def start_cmd(message: types.Message, command: CommandObject):
         await message.answer("⚠️ You must join our channel first to use the bot!", reply_markup=kb)
         return
 
-    if args and args.startswith("vid"):
-        user = await users_col.find_one({"user_id": uid})
-        if not user or user.get("credits", 0) < 1:
+    # ৪. ভিডিও লিংক হ্যান্ডলিং
+    if args.startswith("vid"):
+        if not user_data or user_data.get("credits", 0) < 1:
             await message.answer("❌ আপনার পর্যাপ্ত ক্রেডিট নেই! ভিডিও দেখতে ক্রেডিট অর্জন করুন বা রেফার করুন।")
             return
 
@@ -122,21 +162,6 @@ async def start_cmd(message: types.Message, command: CommandObject):
             asyncio.create_task(auto_delete_video(uid, notif_msg.message_id, 600))
             return
 
-    user = await users_col.find_one({"user_id": uid})
-    if not user:
-        credits = 10
-        if args and args.startswith("ref_"):
-            try:
-                ref_id = int(args.split("_")[1])
-                if ref_id != uid:
-                    await users_col.update_one({"user_id": ref_id}, {"$inc": {"credits": 5}})
-                    try: await bot.send_message(ref_id, "🎉 Someone joined! You got 5 credits.")
-                    except: pass
-                    credits += 2
-            except: pass
-        
-        await users_col.insert_one({"user_id": uid, "credits": credits, "name": name, "joined_at": datetime.utcnow()})
-
     await message.answer(f"🎉 Welcome {name}!\n\n💎 **Your starting credits:** 10", reply_markup=get_main_menu())
 
 @dp.message(F.text == "🎁 Claim Free Credit")
@@ -144,8 +169,13 @@ async def claim_credit_handler(message: types.Message):
     uid = message.from_user.id
     user = await users_col.find_one({"user_id": uid})
     
+    # অটো-রেজিস্ট্রেশন (যাতে 'আগে বট স্টার্ট করুন' মেসেজ না আসে)
     if not user:
-        return await message.answer("❌ আগে বটটি স্টার্ট করুন!")
+        await users_col.insert_one({"user_id": uid, "credits": 10, "name": message.from_user.full_name, "joined_at": datetime.utcnow()})
+        user = await users_col.find_one({"user_id": uid})
+
+    if user.get("is_banned"):
+        return await message.answer("🚫 আপনি নিষিদ্ধ।")
 
     last_claim = user.get("last_claim_time")
     current_time = datetime.utcnow()
@@ -158,7 +188,6 @@ async def claim_credit_handler(message: types.Message):
             minutes, _ = divmod(remainder, 60)
             return await message.answer(f"⏳ আপনি ইতিমধ্যে ক্রেডিট নিয়েছেন!\n\nআবার **{hours} ঘণ্টা {minutes} মিনিট** পর চেষ্টা করুন।")
 
-    # আপডেট ক্রেডিট এবং সময়
     await users_col.update_one(
         {"user_id": uid},
         {
@@ -172,12 +201,15 @@ async def claim_credit_handler(message: types.Message):
 async def wallet_handler(message: types.Message):
     uid = message.from_user.id
     user = await users_col.find_one({"user_id": uid})
+    
+    if user and user.get("is_banned"):
+        return await message.answer("🚫 আপনি নিষিদ্ধ।")
+
     current_credits = user.get("credits", 0) if user else 0
     
     refer_link = f"https://t.me/{BOT_USERNAME}?start=ref_{uid}"
     share_text = f"https://t.me/share/url?url={refer_link}&text=বটটি ব্যবহার করে ফ্রি ক্রেডিট পান!"
 
-    # Inline buttons remain unchanged as requested
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🤝 Refer & Earn", url=share_text)],
         [InlineKeyboardButton(text="💎 Buy Credits", url=f"https://t.me/{ADMIN_USERNAME}")]
@@ -195,6 +227,27 @@ async def wallet_handler(message: types.Message):
     )
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
+# --- অ্যাডমিন কমান্ড (Ban/Unban/Add) ---
+@dp.message(Command("ban"))
+async def ban_user(message: types.Message, command: CommandObject):
+    if not is_admin(message.from_user.id): return
+    try:
+        target_id = int(command.args)
+        await users_col.update_one({"user_id": target_id}, {"$set": {"is_banned": True}}, upsert=True)
+        await message.answer(f"✅ User `{target_id}` has been banned.")
+    except:
+        await message.answer("❌ Format: `/ban [user_id]`")
+
+@dp.message(Command("unban"))
+async def unban_user(message: types.Message, command: CommandObject):
+    if not is_admin(message.from_user.id): return
+    try:
+        target_id = int(command.args)
+        await users_col.update_one({"user_id": target_id}, {"$set": {"is_banned": False}})
+        await message.answer(f"✅ User `{target_id}` has been unbanned.")
+    except:
+        await message.answer("❌ Format: `/unban [user_id]`")
+
 @dp.message(Command("add"))
 async def add_credits(message: types.Message, command: CommandObject):
     if not is_admin(message.from_user.id): return
@@ -210,7 +263,7 @@ async def add_credits(message: types.Message, command: CommandObject):
 async def admin_panel(message: types.Message):
     if not is_admin(message.from_user.id): return
     total_users = await users_col.count_documents({})
-    text = f"⚡ **BOT STATUS**\n\n👥 **Total Users:** {total_users}\n💻 **CPU:** {psutil.cpu_percent()}%\n\n`/add [id] [amount]`"
+    text = f"⚡ **BOT STATUS**\n\n👥 **Total Users:** {total_users}\n💻 **CPU:** {psutil.cpu_percent()}%\n\n`/add [id] [amount]`\n`/ban [id]` | `/unban [id]`"
     await message.answer(text, parse_mode="Markdown")
 
 @dp.message(F.video)
@@ -223,6 +276,9 @@ async def handle_admin_video(message: types.Message):
 
 @dp.message()
 async def unknown(message: types.Message):
+    uid = message.from_user.id
+    user = await users_col.find_one({"user_id": uid})
+    if user and user.get("is_banned"): return
     await message.answer("❓ **Unknown command!**", reply_markup=get_main_menu())
 
 async def main():
@@ -231,4 +287,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
+        
