@@ -60,10 +60,11 @@ class CooldownMiddleware(BaseMiddleware):
         user = None
         is_callback = False
 
-        if event.message:
-            user = event.message.from_user
-        elif event.callback_query:
-            user = event.callback_query.from_user
+        # aiogram 3.x এ event সরাসরি Message অথবা CallbackQuery অবজেক্ট হিসেবে আসে
+        if isinstance(event, types.Message):
+            user = event.from_user
+        elif isinstance(event, types.CallbackQuery):
+            user = event.from_user
             is_callback = True
 
         if user:
@@ -76,7 +77,10 @@ class CooldownMiddleware(BaseMiddleware):
 
             if current_time - last_time < self.limit:
                 if is_callback:
-                    await event.callback_query.answer("⚠️ Please wait... Don't spam!", show_alert=True)
+                    try:
+                        await event.answer("⚠️ Please wait... Don't spam!", show_alert=True)
+                    except:
+                        pass
                 return  # হ্যান্ডলারে মেসেজ পাস না করে এখানেই ব্লক করে দেওয়া হলো
 
             self.cooldowns[user.id] = current_time
@@ -372,7 +376,7 @@ async def admin_panel(message: types.Message):
 
 @dp.message(Command("broadcast"))
 async def broadcast_handler(message: types.Message):
-    """উন্নত ব্রডকাস্ট ফিচার (ফটো এবং কাস্টম ক্যাপশন সাপোর্টসহ)"""
+    """উнят ব্রডকাস্ট ফিচার (ফটো এবং কাস্টম ক্যাপশন সাপোর্টসহ)"""
     if not is_admin(message.from_user.id): return
     
     if not message.reply_to_message:
@@ -390,7 +394,6 @@ async def broadcast_handler(message: types.Message):
         target_id = user["user_id"]
         try:
             if reply.photo:
-                # ফটো + ক্যাপশন থাকলে সহ ব্রডকাস্ট করবে (parse_mode ফিক্স করা হয়েছে)
                 await bot.send_photo(
                     chat_id=target_id, 
                     photo=reply.photo[-1].file_id, 
@@ -398,11 +401,10 @@ async def broadcast_handler(message: types.Message):
                     parse_mode="Markdown" if reply.caption else None
                 )
             else:
-                # শুধুমাত্র টেক্সট ব্রডকাস্ট
                 await bot.send_message(chat_id=target_id, text=reply.text, parse_mode="Markdown" if reply.text else None)
             
             success_count += 1
-            await asyncio.sleep(0.05) # এপিআই ফ্লড রেট এড়াতে সামান্য বিরতি
+            await asyncio.sleep(0.05) 
         except (TelegramForbiddenError, TelegramBadRequest):
             failed_count += 1
         except Exception as e:
@@ -424,7 +426,8 @@ async def handle_admin_video(message: types.Message):
     await video_links_col.insert_one({"video_key": video_key, "file_id": file_id, "created_at": datetime.utcnow()})
     await message.answer(f"✅ **Video Saved!**\n🔗 Link: `https://t.me/{BOT_USERNAME}?start={video_key}`", parse_mode="Markdown")
 
-@dp.message()
+# শুধু প্রাইভেট চ্যাটে রেসপন্স করার ফিল্টার (গ্রুপে স্প্যামিং ব্লক করার জন্য)
+@dp.message(F.chat.type == "private")
 async def unknown(message: types.Message):
     uid = message.from_user.id
     user = await users_col.find_one({"user_id": uid})
@@ -437,5 +440,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
+            
