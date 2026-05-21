@@ -29,6 +29,7 @@ client = AsyncIOMotorClient(MONGO_URL)
 db = client["video_bot_db"]
 users_col = db["users"]
 video_links_col = db["video_links"]
+delete_queue_col = db["delete_queue"]
 
 class CooldownMiddleware(BaseMiddleware):
     def __init__(self, limit: int = 2):
@@ -76,12 +77,27 @@ async def is_subscribed(user_id):
         logging.error(f"Subscription check error for {user_id}: {e}")
         return False
 
-async def auto_delete_video(chat_id, msg_id, seconds=600):
-    await asyncio.sleep(seconds)
-    try:
-        await bot.delete_message(chat_id, msg_id)
-    except Exception as e:
-        logging.error(f"Auto delete failed: {e}")
+async def auto_delete_scheduler(bot: Bot):
+    logging.info("🚀 Background Auto-Delete Scheduler Started...")
+    while True:
+        try:
+            now = datetime.utcnow()
+            expired_tasks = delete_queue_col.find({"expire_at": {"$lte": now}})
+            async for task in expired_tasks:
+                chat_id = task["chat_id"]
+                message_id = task["message_id"]
+                task_id = task["_id"]
+                try:
+                    await bot.delete_message(chat_id, message_id)
+                except TelegramBadRequest:
+                    pass
+                except Exception as e:
+                    logging.error(f"Scheduler failed to delete message {message_id}: {e}")
+                await delete_queue_col.delete_one({"_id": task_id})
+                await asyncio.sleep(0.05)
+        except Exception as e:
+            logging.error(f"Error in auto_delete_scheduler: {e}")
+        await asyncio.sleep(10)
 
 def get_main_menu():
     return ReplyKeyboardMarkup(
@@ -215,8 +231,11 @@ async def start_cmd(message: types.Message, command: CommandObject):
             sent_video = await bot.send_video(chat_id=uid, video=video_data["file_id"])
             notif_msg = await message.answer("⚠️ **Security Alert:** This video will be deleted in **10 minutes**.")
             await send_log(f"📺 **Video Viewed**\n👤 **Name:** {name}\n🆔 **ID:** `{uid}`\n🔑 **Key:** `{args}`\n💰 **Status:** 1 Credit deducted")
-            asyncio.create_task(auto_delete_video(uid, sent_video.message_id, 600))
-            asyncio.create_task(auto_delete_video(uid, notif_msg.message_id, 600))
+            expire_time = datetime.utcnow() + timedelta(seconds=600)
+            await delete_queue_col.insert_many([
+                {"chat_id": uid, "message_id": sent_video.message_id, "expire_at": expire_time},
+                {"chat_id": uid, "message_id": notif_msg.message_id, "expire_at": expire_time}
+            ])
             return
     await message.answer(f"🎉 Welcome {name}!\n\n💎 **Your starting credits:** 10", reply_markup=get_main_menu())
 
@@ -310,7 +329,7 @@ async def broadcast_handler(message: types.Message):
     if not message.reply_to_message:
         return await message.reply("⚠️ **ভুল ফরম্যাট!** যেকোনো মেসেজ বা ফটোর রিপ্লাইয়ে `/broadcast` লিখুন।")
     reply = message.reply_to_message
-    status_msg = await message.answer("⏳ **ব্রডকাস্ট প্রসেস শুরু হচ্ছে... অনুগ্রহ করে অপেক্ষা করুন।**")
+    status_msg = await message.answer("⏳ **বস,F@,ব্রডকাস্ট প্রসেস শুরু হচ্ছে... অনুগ্রহ করে অপেক্ষা করুন।**")
     cursor = users_col.find({})
     total_users = await users_col.count_documents({})
     success_count = 0
@@ -358,10 +377,8 @@ async def promote_to_admin(message: types.Message, command: CommandObject):
         await users_col.update_one({"user_id": target_id}, {"$set": {"is_admin": True}}, upsert=True)
         await message.answer(f"✅ User `{target_id}` কে সফলভাবে **Admin** বানানো হয়েছে।")
         await send_log(f"👑 **New Admin Promoted**\n🆔 **Target ID:** `{target_id}`\n👤 **By Main Admin:** `{message.from_user.id}`")
-        try:
-            await bot.send_message(target_id, "🎉 অভিনন্দন! আপনাকে এই বটের এডমিন প্যানেলের অ্যাক্সেস দেওয়া হয়েছে।")
-        except:
-            pass
+        try: await bot.send_message(target_id, "🎉 অভিনন্দন! আপনাকে এই বটের এডমিন প্যানেলের অ্যাক্সেস দেওয়া হয়েছে।")
+        except: pass
     except:
         await message.answer("❌ ফরম্যাট ভুল! সঠিক ফরম্যাট: `/makeadmin [user_id]`")
 
@@ -386,6 +403,7 @@ async def unknown(message: types.Message):
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
+    asyncio.create_task(auto_delete_scheduler(bot))
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
