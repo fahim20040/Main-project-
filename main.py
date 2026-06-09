@@ -18,6 +18,11 @@ ADMIN_ID = 6793604200
 CHANNEL_ID = -1003960638119
 LOG_CHANNEL_ID = -1003943039065  
 CHANNEL_URL = "https://t.me/+iIe1XRdmMr5kNzFl"
+
+# ২য় বাধ্যতামূলক চ্যানেলের আইডি এবং লিঙ্ক এখানে যুক্ত করা হয়েছে
+CHANNEL_ID_2 = -1003968032542
+CHANNEL_URL_2 = "https://t.me/digitalshopbd_1"
+
 ADMIN_USERNAME = "artist_x0"
 BOT_USERNAME = "Genz2027bot"
 START_TIME = time.time()
@@ -69,10 +74,19 @@ async def send_log(text):
     except Exception as e:
         logging.error(f"Log error: {e}")
 
+# এই ফাংশনটি আপডেট করা হয়েছে যেন ২টি চ্যানেলই চেক করে
 async def is_subscribed(user_id):
     try:
-        member = await bot.get_chat_member(CHANNEL_ID, user_id)
-        return member.status in ["member", "administrator", "creator"]
+        # ১ম চ্যানেল চেক
+        member1 = await bot.get_chat_member(CHANNEL_ID, user_id)
+        sub1 = member1.status in ["member", "administrator", "creator"]
+        
+        # ২য় চ্যানেল চেক
+        member2 = await bot.get_chat_member(CHANNEL_ID_2, user_id)
+        sub2 = member2.status in ["member", "administrator", "creator"]
+        
+        # ইউজার ২টি চ্যানেলেই জয়েন করলেই কেবল True রিটার্ন করবে
+        return sub1 and sub2
     except Exception as e:
         logging.error(f"Subscription check error for {user_id}: {e}")
         return False
@@ -176,7 +190,7 @@ async def check_subscription_callback(call: types.CallbackQuery):
             await call.message.delete()
             await bot.send_message(uid, f"Welcome back, {call.from_user.full_name}!", reply_markup=get_main_menu())
         else:
-            await call.answer("⚠️ You haven't joined the channel yet! Please join first.", show_alert=True)
+            await call.answer("⚠️ You haven't joined both channels yet! Please join first.", show_alert=True)
     except Exception as e:
         logging.error(f"Callback error: {e}")
         await call.answer("❌ Error occurred!", show_alert=True)
@@ -214,13 +228,17 @@ async def start_cmd(message: types.Message, command: CommandObject):
             )
             await send_log(log_msg)
             user_data = await users_col.find_one({"user_id": uid})
+    
+    # এই কীবোর্ড অপশনটি আপডেট করা হয়েছে ২টি চ্যানেলের বোতাম দেখানোর জন্য
     if not await is_subscribed(uid):
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_URL)],
+            [InlineKeyboardButton(text="📢 Join Channel 1", url=CHANNEL_URL)],
+            [InlineKeyboardButton(text="📢 Join Channel 2", url=CHANNEL_URL_2)],
             [InlineKeyboardButton(text="📂 Check Again", callback_data=f"check_{args or 'none'}")]
         ])
-        await message.answer("⚠️ You must join our channel first to use the bot!", reply_markup=kb)
+        await message.answer("⚠️ You must join both of our channels first to use the bot!", reply_markup=kb)
         return
+        
     if args.startswith("vid"):
         if not user_data or user_data.get("credits", 0) < 1:
             await message.answer("❌ আপনার পর্যাপ্ত ক্রেডিট নেই! ভিডিও দেখতে ক্রেডিট অর্জন করুন বা রেফার করুন।")
@@ -329,7 +347,7 @@ async def broadcast_handler(message: types.Message):
     if not message.reply_to_message:
         return await message.reply("⚠️ **ভুল ফরম্যাট!** যেকোনো মেসেজ বা ফটোর রিপ্লাইয়ে `/broadcast` লিখুন।")
     reply = message.reply_to_message
-    status_msg = await message.answer("⏳ **বস,F@,ব্রডকাস্ট প্রসেস শুরু হচ্ছে... অনুগ্রহ করে অপেক্ষা করুন।**")
+    status_msg = await message.answer("⏳ **বস,ব্রডকাস্ট প্রসেস শুরু হচ্ছে... অনুগ্রহ করে অপেক্ষা করুন।**")
     cursor = users_col.find({})
     total_users = await users_col.count_documents({})
     success_count = 0
@@ -408,4 +426,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
