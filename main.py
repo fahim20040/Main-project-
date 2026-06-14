@@ -15,9 +15,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 API_TOKEN = "8565287860:AAEuYopIrpt9UtZLXMLxC_ceo5z-fOTsT8M"
 MONGO_URL = "mongodb+srv://itsmeratul3_db_user:Ratul1234@mybotdatabase.5m5engl.mongodb.net/?retryWrites=true&w=majority"
 ADMIN_ID = 6793604200 
-CHANNEL_ID = -1003960638119
+CHANNEL_ID = -1004275586695
 LOG_CHANNEL_ID = -1003943039065  
-CHANNEL_URL = "https://t.me/+iIe1XRdmMr5kNzFl"
+CHANNEL_URL = "https://t.me/noodels_0"
 
 # ২য় বাধ্যতামূলক চ্যানেলের আইডি এবং লিঙ্ক এখানে যুক্ত করা হয়েছে
 CHANNEL_ID_2 = -1003968032542
