@@ -130,7 +130,60 @@ async def is_admin(user_id: int) -> bool:
     if user and user.get("is_admin") is True:
         return True
     return False
+# ইউজার "Start the bot" এ চাপ দিলে এই ফাংশনটি কাজ করবে
+@dp.message(F.text == "Start the bot")
+async def start_bot_video_handler(message: types.Message):
+    uid = message.from_user.id
+    user = await users_col.find_one({"user_id": uid})
+    
+    # ১. ইউজার ব্যানড কিনা চেক করা
+    if user and user.get("is_banned"): 
+        return await message.answer("🚫 আপনি নিষিদ্ধ।")
 
+    # ২. ইউজার ইতিমধ্যে ভিডিওটি দেখেছে কিনা চেক করা (১ বার লিমিট করার জন্য)
+    if user and user.get("has_watched_tutorial"):
+        return await message.answer("⚠️ আপনি ইতিমধ্যে টিউটোরিয়াল ভিডিওটি একবার দেখে ফেলেছেন! এটি আর দ্বিতীয়বার দেখা যাবে না।")
+
+    # ৩. ডাটাবেজ থেকে ভিডিও খুঁজে বের করা (আপনার দেওয়া কী: vid_91c30ec1)
+    video_key = "vid_91c30ec1"
+    video_data = await video_links_col.find_one({"video_key": video_key})
+    
+    # আপনার দেওয়া নির্দিষ্ট ক্যাপশন/লেখা
+    caption_text = (
+        "বট ব্যাবহার এর,সম্পুর্ন টিউটোরিয়াল,একটি ভিডিও তে ⚠️\n\n"
+        "আশাকরি এখন আর কোনো, সমস্যা হবে না,এর পড়েও না বুঝতে পারলে,আমরা আন্তরিকভাবে দুঃখিত,প্রসেস টি আপনার কাছে এওটা কঠিন মনে হচ্ছে বিধায় 🙂"
+    )
+
+    if video_data:
+        try:
+            # ৪. ভিডিও এবং মেসেজ একসাথে সেন্ড করা
+            await bot.send_video(
+                chat_id=uid,
+                video=video_data["file_id"],
+                caption=caption_text
+            )
+            
+            # ৫. ইউজারের ডাটাবেজে মার্ক করে দেওয়া যেন দ্বিতীয়বার না দেখতে পারে
+            await users_col.update_one(
+                {"user_id": uid},
+                {"$set": {"has_watched_tutorial": True}},
+                upsert=True
+            )
+            
+        except Exception as e:
+            logging.error(f"Error sending tutorial video: {e}")
+            await message.answer(
+                f"❌ ভিডিওটি পাঠাতে সমস্যা হয়েছে। অনুগ্রহ করে সরাসরি [অ্যাডমিনের সাথে যোগাযোগ করুন](https://t.me/{ADMIN_USERNAME})।",
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+    else:
+        await message.answer(
+            f"❌ দুঃখিত, টিউটোরিয়াল ভিডিওটি খুঁজে পাওয়া যায়নি। দয়া করে [অ্যাডমিনের সাথে যোগাযোগ করুন](https://t.me/{ADMIN_USERNAME})।",
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
+        
 @dp.callback_query(F.data.startswith("check_"))
 async def check_subscription_callback(call: types.CallbackQuery):
     uid = call.from_user.id
