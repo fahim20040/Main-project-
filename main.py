@@ -12,7 +12,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from motor.motor_asyncio import AsyncIOMotorClient
 
-API_TOKEN = "8565287860:AAHszF6esEbN7moYuHeXRygU5UdSiOoJCd4"
+API_TOKEN = ""
 MONGO_URL = "mongodb+srv://itsmeratul3_db_user:Ratul1234@mybotdatabase.5m5engl.mongodb.net/?retryWrites=true&w=majority"
 ADMIN_ID = 6793604200 
 CHANNEL_ID = -1004275586695
