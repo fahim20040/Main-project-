@@ -17,14 +17,14 @@ MONGO_URL = "mongodb+srv://itsmeratul3_db_user:Ratul1234@mybotdatabase.5m5engl.m
 ADMIN_ID = 6793604200 
 CHANNEL_ID = -1004275586695
 LOG_CHANNEL_ID = -1003943039065  
-CHANNEL_URL = "https://t.me/noodels_0"
+CHANNEL_URL = ""
 
 # ২য় বাধ্যতামূলক চ্যানেলের আইডি এবং লিঙ্ক এখানে যুক্ত করা হয়েছে
 CHANNEL_ID_2 = -1003968032542
-CHANNEL_URL_2 = "https://t.me/digitalshopbd_1"
+CHANNEL_URL_2 = ""
 
-ADMIN_USERNAME = "artist_x0"
-BOT_USERNAME = "Genz2027bot"
+ADMIN_USERNAME = ""
+BOT_USERNAME = ""
 START_TIME = time.time()
 
 logging.basicConfig(level=logging.INFO)
